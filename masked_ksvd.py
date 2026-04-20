@@ -720,7 +720,7 @@ def plot_results(errors_masked, errors_baseline,
             0.012, 0.012,
             "Run parameters\n" + "\n".join(lines),
             ha="left", va="bottom", fontsize=8, family="monospace",
-            bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.9, edgecolor="#BFBFBF")
+            bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.3, edgecolor="#BFBFBF")
         )
 
     save_dir = os.path.dirname(save_path)
@@ -810,7 +810,7 @@ def _run_single_config(config, seed, output_dir, combo_id="single"):
     ]
     run_tag = _param_tag(row, tag_keys)
     plot_path = os.path.join(output_dir, f"{combo_id}__seed-{seed}__{run_tag}.png")
-    row["plot_path"] = plot_path
+    # row["plot_path"] = plot_path
 
     plot_results(
         err_masked, err_base,
@@ -979,7 +979,7 @@ def main():
     }
 
     # Toggle between one run and full sweep.
-    RUN_SWEEP = True
+    RUN_SWEEP = False
 
     out_root = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -990,10 +990,10 @@ def main():
         sweep_grid = {
             "K_learn": [40, 50, 60],
             "s": [2, 3, 4],
-            "n_iter": [15, 20],
+            "n_iter": [15, 30],
             "als_iters": [8, 15],
         }
-        sweep_seeds = [42, 123]
+        sweep_seeds = [69]
         sweep_out = os.path.join(out_root, "sweep")
         run_hyperparameter_sweep(base_config, sweep_grid, sweep_seeds, sweep_out)
         return
@@ -1005,7 +1005,8 @@ def main():
         combo_id="single"
     )
     print("\nSingle run complete.")
-    print(f"Plot saved -> {single_row['plot_path']}")
+    
+    # print(f"Plot saved -> {single_row['plot_path']}")
 
 
 if __name__ == "__main__":
