@@ -32,6 +32,7 @@ License: MIT
 import sys
 import os
 import time
+import argparse
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -60,6 +61,7 @@ from masked_ksvd import (
     init_dictionary_from_data,
     masked_ksvd_update_atom,
 )
+from custom_masks import generate_mask, MASK_MODES
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -80,10 +82,18 @@ SEED          = 42
 # STEP A — Data Loading & Corruption
 # =============================================================================
 
-def load_and_corrupt_image(seed: int = SEED):
+def load_and_corrupt_image(
+    seed: int = SEED,
+    mask_mode: str = "random",
+    missing_frac: float = MISSING_FRAC,
+    square_size: int = 20,
+    square_center: tuple[int, int] | None = None,
+    scratch_count: int = 3,
+    scratch_thickness: int = 4,
+):
     """
     Load the standard 'camera' grayscale image, resize to IMAGE_SIZE,
-    normalise to float [0,1], and randomly corrupt 30% of pixels.
+    normalise to float [0,1], and corrupt using the selected mask mode.
 
     Returns
     -------
@@ -97,8 +107,16 @@ def load_and_corrupt_image(seed: int = SEED):
                        IMAGE_SIZE, anti_aliasing=True)       # (128,128) float64
 
     # Generate binary mask: 1 = observed, 0 = missing
-    rng  = np.random.default_rng(seed)
-    mask = (rng.uniform(size=IMAGE_SIZE) >= MISSING_FRAC).astype(np.float64)
+    mask = generate_mask(
+        image_shape=IMAGE_SIZE,
+        mode=mask_mode,
+        missing_frac=missing_frac,
+        seed=seed,
+        square_size=square_size,
+        square_center=square_center,
+        scratch_count=scratch_count,
+        scratch_thickness=scratch_thickness,
+    )
 
     # Zero-fill missing pixels.
     # NaN is NOT used here because sklearn.extract_patches_2d rejects NaN.
@@ -106,6 +124,7 @@ def load_and_corrupt_image(seed: int = SEED):
     img_corrupt = img_clean * mask    # missing pixels become 0.0
 
     print(f"  Image shape     : {img_clean.shape}")
+    print(f"  Mask mode       : {mask_mode}")
     print(f"  Missing pixels  : {int((mask == 0).sum())} "
           f"({(mask == 0).mean()*100:.1f}%)")
     print(f"  Observed pixels : {int(mask.sum())} "
@@ -562,11 +581,69 @@ def plot_results(
     print(f"\n  Figure saved -> {save_path}")
 
 
+def parse_cli_args() -> argparse.Namespace:
+    """Parse command-line flags for selecting corruption mask behavior."""
+    parser = argparse.ArgumentParser(
+        description="Phase 3 image inpainting with optional custom masks."
+    )
+    parser.add_argument(
+        "--mask-mode",
+        choices=MASK_MODES,
+        default="random",
+        help=(
+            "Mask pattern to use. 'random' keeps current behavior; "
+            "other modes use structured custom masks."
+        ),
+    )
+    parser.add_argument(
+        "--missing-frac",
+        type=float,
+        default=MISSING_FRAC,
+        help="Missing fraction for --mask-mode random.",
+    )
+    parser.add_argument(
+        "--mask-seed",
+        type=int,
+        default=SEED,
+        help="Random seed used by mask generators.",
+    )
+    parser.add_argument(
+        "--square-size",
+        type=int,
+        default=20,
+        help="Square side length for face-square mask modes.",
+    )
+    parser.add_argument(
+        "--square-center",
+        type=int,
+        nargs=2,
+        metavar=("ROW", "COL"),
+        default=None,
+        help="Square center as ROW COL for face-square mask modes.",
+    )
+    parser.add_argument(
+        "--scratch-count",
+        type=int,
+        default=3,
+        help="Number of diagonal scratches for scratches mask modes.",
+    )
+    parser.add_argument(
+        "--scratch-thickness",
+        type=int,
+        default=4,
+        help="Line thickness for scratches mask modes.",
+    )
+    return parser.parse_args()
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
 
 def main():
+    args = parse_cli_args()
+    square_center = tuple(args.square_center) if args.square_center is not None else None
+
     t_total = time.time()
 
     print("=" * 68)
@@ -576,14 +653,24 @@ def main():
     print(f"  Patch size     : {PATCH_SIZE}  ({PATCH_DIM}-d vectors)")
     print(f"  Dictionary     : {PATCH_DIM}×{N_DICT_ATOMS}  ({N_DICT_ATOMS/PATCH_DIM:.0f}x overcomplete)")
     print(f"  Sparsity       : s = {SPARSITY}")
-    print(f"  Missing frac   : {MISSING_FRAC*100:.0f}%")
+    print(f"  Mask mode      : {args.mask_mode}")
+    if args.mask_mode == "random":
+        print(f"  Missing frac   : {args.missing_frac*100:.0f}%")
     print(f"  Train patches  : {N_TRAIN_PATCHES}")
     print(f"  K-SVD iters    : {N_KSVD_ITER}")
     print()
 
     # ---- A: Load & corrupt --------------------------------------------------
     print("[A]  Loading and corrupting image ...")
-    img_clean, img_corrupt, mask = load_and_corrupt_image(seed=SEED)
+    img_clean, img_corrupt, mask = load_and_corrupt_image(
+        seed=args.mask_seed,
+        mask_mode=args.mask_mode,
+        missing_frac=args.missing_frac,
+        square_size=args.square_size,
+        square_center=square_center,
+        scratch_count=args.scratch_count,
+        scratch_thickness=args.scratch_thickness,
+    )
     print()
 
     # ---- B: Patch extraction ------------------------------------------------
