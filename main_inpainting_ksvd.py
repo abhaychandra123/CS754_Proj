@@ -73,8 +73,8 @@ N_DICT_ATOMS  = 256         # overcomplete dictionary: 256 > 64 (4x)
 SPARSITY      = 10          # nonzeros per patch code; standard for 8x8 patches
 MISSING_FRAC  = 0.30        # fraction of pixels randomly dropped
 N_TRAIN_PATCHES = 3000      # patches used for dictionary learning (speed)
-N_KSVD_ITER   = 25        # K-SVD outer iterations
-N_ALS_ITER    = 10          # ALS steps per atom update
+N_KSVD_ITER   = 35        # K-SVD outer iterations
+N_ALS_ITER    = 15          # ALS steps per atom update
 SEED          = 42
 
 
