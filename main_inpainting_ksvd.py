@@ -8,7 +8,7 @@ processing pipeline using overlapping 8x8 patches.
 
 Architecture
 ------------
-(A) Data prep  : Load camera image → resize 128x128 → float [0,1] → corrupt 30%
+(A) Data prep  : Load camera image → resize 128x128 → float [0,1] → apply mask
 (B) Extraction : sklearn extract_patches_2d → shape translation (N,8,8) → (64,N)
 (C) Learning   : masked_ksvd on 3000 training patches  → D (64×256)
 (D) Coding     : masked_omp on ALL 14641 patches with learned D → Alpha (256×N)
@@ -90,6 +90,10 @@ def load_and_corrupt_image(
     square_center: tuple[int, int] | None = None,
     scratch_count: int = 3,
     scratch_thickness: int = 4,
+    overlay_text: str = "SAMPLE",
+    text_scale: float = 0.24,
+    text_angle: float = -90.0,
+    text_stroke: int = 0.5,
 ):
     """
     Load the standard 'camera' grayscale image, resize to IMAGE_SIZE,
@@ -116,6 +120,10 @@ def load_and_corrupt_image(
         square_center=square_center,
         scratch_count=scratch_count,
         scratch_thickness=scratch_thickness,
+        overlay_text=overlay_text,
+        text_scale=text_scale,
+        text_angle=text_angle,
+        text_stroke=text_stroke,
     )
 
     # Zero-fill missing pixels.
@@ -484,7 +492,7 @@ def plot_results(
     img_panel(fig.add_subplot(gs[0, 0]),
               img_clean, "Original (Ground Truth)", "128×128 grayscale")
 
-    # Row 1, Col 1 — Corrupted (missing pixels shown as light gray overlay)
+    # Row 1, Col 1 — Corrupted (missing pixels shown as red overlay)
     ax = fig.add_subplot(gs[0, 1])
     ax.imshow(img_corrupt, cmap='gray', vmin=0, vmax=1, interpolation='nearest')
     # Highlight missing pixels with a semi-transparent red overlay
@@ -492,8 +500,9 @@ def plot_results(
     miss_rgba[..., 0] = 1.0          # red channel
     miss_rgba[..., 3] = (mask == 0) * 0.55   # alpha only where missing
     ax.imshow(miss_rgba, interpolation='nearest')
+    missing_pct = (mask == 0).mean() * 100.0
     ax.set_title("Corrupted Input", fontsize=11, fontweight='bold', pad=4)
-    ax.set_xlabel(f"30% pixels missing (red)", fontsize=10, labelpad=3)
+    ax.set_xlabel(f"{missing_pct:.1f}% pixels missing (red)", fontsize=10, labelpad=3)
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -633,6 +642,30 @@ def parse_cli_args() -> argparse.Namespace:
         default=4,
         help="Line thickness for scratches mask modes.",
     )
+    parser.add_argument(
+        "--overlay-text",
+        type=str,
+        default="SAMPLE",
+        help="Text string for --mask-mode text-overlay.",
+    )
+    parser.add_argument(
+        "--text-scale",
+        type=float,
+        default=0.24,
+        help="Text size fraction for --mask-mode text-overlay.",
+    )
+    parser.add_argument(
+        "--text-angle",
+        type=float,
+        default=-90.0,
+        help="Text rotation angle in degrees for --mask-mode text-overlay.",
+    )
+    parser.add_argument(
+        "--text-stroke",
+        type=float,
+        default=0.5,
+        help="Stroke width for bold text in --mask-mode text-overlay.",
+    )
     return parser.parse_args()
 
 
@@ -656,6 +689,8 @@ def main():
     print(f"  Mask mode      : {args.mask_mode}")
     if args.mask_mode == "random":
         print(f"  Missing frac   : {args.missing_frac*100:.0f}%")
+    if args.mask_mode == "text-overlay":
+        print(f"  Overlay text   : {args.overlay_text}")
     print(f"  Train patches  : {N_TRAIN_PATCHES}")
     print(f"  K-SVD iters    : {N_KSVD_ITER}")
     print()
@@ -670,6 +705,10 @@ def main():
         square_center=square_center,
         scratch_count=args.scratch_count,
         scratch_thickness=args.scratch_thickness,
+        overlay_text=args.overlay_text,
+        text_scale=args.text_scale,
+        text_angle=args.text_angle,
+        text_stroke=args.text_stroke,
     )
     print()
 

@@ -24,12 +24,17 @@ DEFAULT_SQUARE_SIZE = 20
 DEFAULT_SQUARE_CENTER = (44, 84)
 DEFAULT_SCRATCH_COUNT = 3
 DEFAULT_SCRATCH_THICKNESS = 4
+DEFAULT_OVERLAY_TEXT = "SAMPLE"
+DEFAULT_TEXT_SCALE = 0.24
+DEFAULT_TEXT_ANGLE = -90.0
+DEFAULT_TEXT_STROKE = 0.5
 
 MASK_MODES = (
     "random",
     "face-square",
     "scratches",
     "face-square+scratches",
+    "text-overlay",
 )
 
 
@@ -104,6 +109,86 @@ def diagonal_scratches_mask(
     return mask
 
 
+def _load_bold_font(font_size: int):
+    """Best-effort load of a bold TrueType font, with safe fallback."""
+    from PIL import ImageFont
+
+    font_candidates = [
+        "DejaVuSans-Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/Library/Fonts/Arial Bold.ttf",
+    ]
+
+    for font_path in font_candidates:
+        try:
+            return ImageFont.truetype(font_path, font_size)
+        except OSError:
+            continue
+
+    return ImageFont.load_default()
+
+
+def text_overlay_mask(
+    shape: tuple[int, int],
+    text: str = DEFAULT_OVERLAY_TEXT,
+    text_scale: float = DEFAULT_TEXT_SCALE,
+    text_angle: float = DEFAULT_TEXT_ANGLE,
+    text_stroke: int = DEFAULT_TEXT_STROKE,
+) -> np.ndarray:
+    """Create a mask where rendered white text pixels are marked missing."""
+    if not text or not text.strip():
+        raise ValueError("overlay text must be a non-empty string.")
+
+    from PIL import Image, ImageDraw
+
+    h, w = shape
+    base_size = max(8, int(min(h, w) * max(0.05, float(text_scale))))
+    stroke_width = max(0, int(text_stroke))
+
+    # Render text on a black canvas so white text pixels can be mapped to holes.
+    canvas = Image.new("L", (w, h), color=0)
+    draw = ImageDraw.Draw(canvas)
+
+    font_size = base_size
+    font = _load_bold_font(font_size)
+    bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+
+    # Fit text width to the image while preserving readability.
+    while (text_w > int(0.95 * w) or text_h > int(0.90 * h)) and font_size > 8:
+        font_size -= 1
+        font = _load_bold_font(font_size)
+        bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+    x = (w - text_w) // 2 - bbox[0]
+    y = (h - text_h) // 2 - bbox[1]
+    draw.text(
+        (x, y),
+        text,
+        fill=255,
+        font=font,
+        stroke_width=stroke_width,
+        stroke_fill=255,
+    )
+
+    if float(text_angle) != 0.0:
+        resample = Image.Resampling.BILINEAR if hasattr(Image, "Resampling") else Image.BILINEAR
+        canvas = canvas.rotate(
+            float(text_angle),
+            resample=resample,
+            expand=False,
+            fillcolor=0,
+        )
+
+    text_pixels = np.array(canvas, dtype=np.uint8)
+    mask = np.ones(shape, dtype=np.float64)
+    mask[text_pixels > 0] = 0.0
+    return mask
+
+
 def generate_mask(
     image_shape: tuple[int, int],
     mode: str = DEFAULT_MASK_MODE,
@@ -114,6 +199,10 @@ def generate_mask(
     square_center: tuple[int, int] | None = DEFAULT_SQUARE_CENTER,
     scratch_count: int = DEFAULT_SCRATCH_COUNT,
     scratch_thickness: int = DEFAULT_SCRATCH_THICKNESS,
+    overlay_text: str = DEFAULT_OVERLAY_TEXT,
+    text_scale: float = DEFAULT_TEXT_SCALE,
+    text_angle: float = DEFAULT_TEXT_ANGLE,
+    text_stroke: int = DEFAULT_TEXT_STROKE,
 ) -> np.ndarray:
     """
     Generate a binary mask where 1 means observed and 0 means missing.
@@ -128,6 +217,8 @@ def generate_mask(
         Thick random diagonal scratches across the image.
     face-square+scratches
         Union of square hole and scratches.
+    text-overlay
+        White "SAMPLE TEXT" overlay where text pixels are treated as missing.
     """
     if mode not in MASK_MODES:
         raise ValueError(f"Unsupported mode '{mode}'. Expected one of: {MASK_MODES}")
@@ -144,6 +235,15 @@ def generate_mask(
             scratch_count=scratch_count,
             thickness=scratch_thickness,
             seed=seed,
+        )
+
+    if mode == "text-overlay":
+        return text_overlay_mask(
+            image_shape,
+            text=overlay_text,
+            text_scale=text_scale,
+            text_angle=text_angle,
+            text_stroke=text_stroke,
         )
 
     square = square_hole_mask(image_shape, square_size=square_size, center=square_center)
@@ -218,6 +318,29 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--scratch-count", type=int, default=DEFAULT_SCRATCH_COUNT)
     parser.add_argument("--scratch-thickness", type=int, default=DEFAULT_SCRATCH_THICKNESS)
     parser.add_argument(
+        "--overlay-text",
+        default=DEFAULT_OVERLAY_TEXT,
+        help="Text used for text-overlay mode.",
+    )
+    parser.add_argument(
+        "--text-scale",
+        type=float,
+        default=DEFAULT_TEXT_SCALE,
+        help="Text size as a fraction of min(image_height, image_width).",
+    )
+    parser.add_argument(
+        "--text-angle",
+        type=float,
+        default=DEFAULT_TEXT_ANGLE,
+        help="Rotation angle (degrees) for text-overlay mode.",
+    )
+    parser.add_argument(
+        "--text-stroke",
+        type=int,
+        default=DEFAULT_TEXT_STROKE,
+        help="Stroke width for bold text rendering in text-overlay mode.",
+    )
+    parser.add_argument(
         "--save-mask",
         default=os.path.join("outputs", "custom_mask.npy"),
         help="Path to save the generated mask as .npy.",
@@ -244,6 +367,10 @@ def main() -> None:
         square_center=square_center,
         scratch_count=args.scratch_count,
         scratch_thickness=args.scratch_thickness,
+        overlay_text=args.overlay_text,
+        text_scale=args.text_scale,
+        text_angle=args.text_angle,
+        text_stroke=args.text_stroke,
     )
 
     mask_out_dir = os.path.dirname(args.save_mask)
