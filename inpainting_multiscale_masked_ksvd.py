@@ -127,7 +127,7 @@ HOLE_C0, HOLE_C1 = 55, 75     # col slice  [C0, C1)  → 20 cols
 # Dictionary learning
 PATCH_SIZE   = (8, 8)
 PATCH_DIM    = 64              # 8*8
-N_ATOMS      = 256             # 4× overcomplete  (256 > 64)
+N_ATOMS      = 512             # 4× overcomplete  (256 > 64)
 SPARSITY     = 10              # nonzeros per patch code
 ALS_ITERS    = 10              # ALS steps inside each masked_ksvd_update_atom
 
@@ -135,9 +135,9 @@ ALS_ITERS    = 10              # ALS steps inside each masked_ksvd_update_atom
 #   n_train  : patches sampled for dictionary learning (speed vs quality)
 #   n_iter   : K-SVD outer iterations
 LEVEL_CFG = {
-    3: {"size": (32, 32),   "n_train": 500,  "n_iter": 20},
-    2: {"size": (64, 64),   "n_train": 1500, "n_iter": 22},
-    1: {"size": (128, 128), "n_train": 3000, "n_iter": 25},
+    3: {"size": (32, 32),   "n_train": 500,  "n_iter": 25},
+    2: {"size": (64, 64),   "n_train": 1500, "n_iter": 25},
+    1: {"size": (128, 128), "n_train": 3000, "n_iter": 20},
 }
 
 SEED = 42
@@ -819,29 +819,6 @@ def evaluate(img_true: np.ndarray, img_pred: np.ndarray, label: str) -> dict:
     return {"psnr": p, "ssim": s}
 
 
-def evaluate_hole_only(
-    img_true: np.ndarray,
-    img_pred: np.ndarray,
-    mask:     np.ndarray,
-    label:    str,
-) -> dict:
-    """
-    PSNR evaluated ONLY inside the hole (mask == 0).
-    This isolates the inpainting quality from background reconstruction.
-    """
-    n_missing = int((mask == 0).sum())
-    if n_missing == 0:
-        print(f"  {label:<45s}: Hole-PSNR =   N/A   (no missing pixels)")
-        return {"hole_psnr": np.nan}
-
-    hole_true = img_true[mask == 0]
-    hole_pred = img_pred[mask == 0]
-    mse  = np.mean((hole_true - hole_pred) ** 2)
-    psnr = 10 * np.log10(1.0 / (mse + 1e-12))
-    print(f"  {label:<45s}: Hole-PSNR = {psnr:6.2f} dB   (hole pixels only)")
-    return {"hole_psnr": psnr}
-
-
 # =============================================================================
 # VISUALISATION
 # =============================================================================
@@ -963,11 +940,10 @@ def plot_results(
         ax   = fig.add_subplot(ax_pos)
         err  = np.abs(img_pred - img_clean)
         ax.imshow(err, cmap='hot', vmin=0, vmax=vmax_err, interpolation='nearest')
-        mean_hole = err[mask_128 == 0].mean()
         mean_all  = err.mean()
         ax.set_title(title, fontsize=10, fontweight='bold', color=color, pad=3)
         ax.set_xlabel(
-            f"hole MAE={mean_hole:.4f}  |  full MAE={mean_all:.4f}",
+            f"full MAE={mean_all:.4f}",
             fontsize=8, labelpad=2
         )
         ax.set_xticks([]); ax.set_yticks([])
@@ -1164,13 +1140,6 @@ def main():
         'level2':     evaluate(img_clean, recon_64_at_128, "Level 2 (64→128 bilinear upsample)"),
         'level1':     evaluate(img_clean, recon_128,       "Level 1 — Masked K-SVD FINAL"),
     }
-
-    print()
-    print("  Hole-only evaluation (missing region exclusively):")
-    evaluate_hole_only(img_clean, img_bh,          mask_128, "Biharmonic inpainting")
-    evaluate_hole_only(img_clean, recon_32_at_128, mask_128, "Level 3 (32→128)")
-    evaluate_hole_only(img_clean, recon_64_at_128, mask_128, "Level 2 (64→128)")
-    evaluate_hole_only(img_clean, recon_128,       mask_128, "Level 1 — Masked K-SVD FINAL")
 
     # ---- PSNR improvement summary -------------------------------------------
     psnr_bh  = metrics['biharmonic']['psnr']
