@@ -258,7 +258,7 @@ def generate_mask(
 
 def _camera_image(image_size: tuple[int, int]) -> np.ndarray:
     """Load and resize skimage camera image to [0,1] float."""
-    img_raw = skdata.camera()
+    img_raw = skdata.brick()
     return resize(img_raw.astype(np.float64) / 255.0, image_size, anti_aliasing=True)
 
 

@@ -70,7 +70,7 @@ IMAGE_SIZE    = (128, 128)
 PATCH_SIZE    = (8, 8)
 PATCH_DIM     = 64          # 8*8 flattened patch dimension
 N_DICT_ATOMS  = 256         # overcomplete dictionary: 256 > 64 (4x)
-SPARSITY      = 10          # nonzeros per patch code; standard for 8x8 patches
+SPARSITY      = 4          # nonzeros per patch code; standard for 8x8 patches
 MISSING_FRAC  = 0.30        # fraction of pixels randomly dropped
 N_TRAIN_PATCHES = 3000      # patches used for dictionary learning (speed)
 N_KSVD_ITER   = 35        # K-SVD outer iterations
@@ -106,7 +106,7 @@ def load_and_corrupt_image(
     mask        : (H, W)  float binary mask; 1=observed, 0=missing
     """
     # Load and resize
-    img_raw   = skdata.camera()                              # (512,512) uint8
+    img_raw   = skdata.brick()                              # (512,512) uint8
     img_clean = resize(img_raw.astype(np.float64) / 255.0,
                        IMAGE_SIZE, anti_aliasing=True)       # (128,128) float64
 
@@ -741,6 +741,9 @@ def main():
     print()
     print("[E]  Reconstructing images from patch codes ...")
     img_masked   = patches_to_image(D_masked,   Alpha_masked,   IMAGE_SIZE)
+    #### AHA MOMENTTTTT - the K-SVD reconstruction is a lossy approximation of the original image, so we overwrite the known pixels with the original values to get a "masked" reconstruction that is guaranteed to be
+    # Overwrite K-SVD's lossy approximation with the known healthy pixels
+    img_masked = np.where(mask == 1, img_corrupt, img_masked)
     img_baseline = patches_to_image(D_baseline, Alpha_baseline, IMAGE_SIZE)
     print(f"  Masked K-SVD  recon range : [{img_masked.min():.3f}, {img_masked.max():.3f}]")
     print(f"  Baseline      recon range : [{img_baseline.min():.3f}, {img_baseline.max():.3f}]")
