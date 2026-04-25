@@ -741,10 +741,17 @@ def main():
     print()
     print("[E]  Reconstructing images from patch codes ...")
     img_masked   = patches_to_image(D_masked,   Alpha_masked,   IMAGE_SIZE)
-    #### AHA MOMENTTTTT - the K-SVD reconstruction is a lossy approximation of the original image, so we overwrite the known pixels with the original values to get a "masked" reconstruction that is guaranteed to be
-    # Overwrite K-SVD's lossy approximation with the known healthy pixels
-    img_masked = np.where(mask == 1, img_corrupt, img_masked)
     img_baseline = patches_to_image(D_baseline, Alpha_baseline, IMAGE_SIZE)
+
+    # Standard inpainting protocol: observed pixels are known data and must
+    # be preserved exactly; only missing pixels need hallucinating.  K-SVD's
+    # sparse approximation D@alpha is lossy even at observed positions, so we
+    # overwrite them with the originals.  Biharmonic already preserves observed
+    # pixels by construction (Dirichlet boundary condition), so applying this
+    # to BOTH K-SVD methods makes the comparison fully symmetric across all
+    # three reconstructions reported below.
+    img_masked   = np.where(mask == 1, img_corrupt, img_masked)
+    img_baseline = np.where(mask == 1, img_corrupt, img_baseline)
     print(f"  Masked K-SVD  recon range : [{img_masked.min():.3f}, {img_masked.max():.3f}]")
     print(f"  Baseline      recon range : [{img_baseline.min():.3f}, {img_baseline.max():.3f}]")
 

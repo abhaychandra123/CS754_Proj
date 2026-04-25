@@ -243,6 +243,78 @@ def downsample_mask(mask_128: np.ndarray, target_size: tuple) -> np.ndarray:
     return (raw > 0.5).astype(np.float64)   # strict binarisation
 
 
+def mask_aware_downsample(
+    img_corrupt: np.ndarray,
+    mask: np.ndarray,
+    target_size: tuple,
+    eps: float = 1e-8,
+) -> np.ndarray:
+    """
+    Downsample a corrupted image without leaking missing-pixel zeros into
+    nearby observed pixels.  Uses normalised convolution (Shepard form).
+
+    Why a plain sk_resize fails
+    ---------------------------
+    sk_resize(img_corrupt, target_size, anti_aliasing=True) applies a Gaussian
+    blur before subsampling.  Because img_corrupt has zeros at missing
+    positions, that blur drags observed pixels near a hole boundary toward
+    zero — biasing the downsampled "observed" values darker than they should
+    be.  The K-SVD pipeline at the coarse level then trains on systematically
+    biased pixels (a silent dataset bias, not an algorithmic bug).
+
+    Normalised convolution
+    ----------------------
+    Treat each input pixel's mask value as a confidence weight.  Smooth-and-
+    subsample both the numerator (img * mask) and the denominator (mask) with
+    the SAME anti-aliasing kernel, then divide.  The result at each output
+    pixel is the weighted average of ONLY the observed input pixels that fall
+    within the kernel's support; zeros at missing positions contribute nothing.
+
+        img_low[y, x] = (k * (mask . img))[y, x]
+                        ----------------------------
+                        (k * mask)[y, x]   + eps
+
+    where k is the anti-aliasing kernel implicit in sk_resize.
+
+    Edge case
+    ---------
+    At output pixels whose entire kernel support is missing (denominator ~ 0)
+    we return 0.  The caller subsequently multiplies by the strict binary
+    downsampled mask (downsample_mask), so any such position lies inside a
+    downsampled hole and its value is irrelevant to patch extraction.
+
+    Sanity (strict generalisation of the original code)
+    ---------------------------------------------------
+    For a fully observed input (mask identically 1) the denominator is 1
+    everywhere and the result reduces exactly to
+        sk_resize(img, target_size, anti_aliasing=True, preserve_range=True),
+    so substituting this for the original sk_resize call cannot regress the
+    no-missing-pixels case.
+
+    Parameters
+    ----------
+    img_corrupt : (H, W)   zero-filled corrupted image (= img * mask)
+    mask        : (H, W)   binary float64 mask (1=observed, 0=missing)
+    target_size : (H', W') target resolution
+    eps         : float    numerical floor for division
+
+    Returns
+    -------
+    img_low : (H', W') float64, mask-weighted downsampled estimate
+    """
+    num = sk_resize(
+        img_corrupt, target_size,
+        anti_aliasing=True, preserve_range=True,
+    )
+    den = sk_resize(
+        mask, target_size,
+        anti_aliasing=True, preserve_range=True,
+    )
+    # np.maximum(den, eps) protects the False branch from divide-by-zero
+    # warnings: numpy evaluates BOTH np.where branches before selecting.
+    return np.where(den > eps, num / np.maximum(den, eps), 0.0)
+
+
 def corrupt_image(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
     Apply binary mask to image: missing pixels set to 0.0.
@@ -639,16 +711,21 @@ def run_pyramid(
     cfg3  = LEVEL_CFG[3]
     sz3   = cfg3["size"]   # (32, 32)
 
-    # --- Downsample image (anti_aliasing=True prevents aliasing artefacts) ---
-    img_32  = sk_resize(img_corrupt, sz3, anti_aliasing=True)  # (32, 32)
+    # --- Downsample image (mask-aware: prevents zero-leakage from holes) ----
+    # A plain sk_resize would Gaussian-blur the zero-filled missing pixels
+    # into nearby observed pixels and bias the coarse "observed" values dark.
+    # mask_aware_downsample uses normalised convolution to exclude missing
+    # pixels from the contribution to each output value.
+    img_32  = mask_aware_downsample(img_corrupt, mask_128, sz3)  # (32, 32)
 
     # --- Downsample mask (nearest-neighbour + threshold → strict binary) -----
     mask_32 = downsample_mask(mask_128, sz3)                   # (32, 32) ∈ {0,1}
     results['mask_32'] = mask_32
 
-    # --- Zero-fill: ensure missing pixels are exactly 0.0 --------------------
-    # (sk_resize with anti_aliasing may blur values near the hole boundary,
-    #  so we explicitly zero-out any pixel where mask_32 == 0)
+    # --- Zero-fill: enforce strict-mask boundary --------------------------
+    # img_32 is mask-aware so observed values are unbiased.  mask_32 (nearest-
+    # neighbour) defines the strict binary boundary used during patch
+    # extraction; multiplying enforces that boundary in the image as well.
     img_32_zero = img_32 * mask_32                             # (32, 32)
 
     rows_miss32 = int((mask_32 == 0).sum())
@@ -691,9 +768,11 @@ def run_pyramid(
     cfg2  = LEVEL_CFG[2]
     sz2   = cfg2["size"]   # (64, 64)
 
-    # --- Downsample 128×128 reference image and mask -------------------------
-    img_64     = sk_resize(img_corrupt, sz2, anti_aliasing=True)  # (64, 64)
-    mask_64    = downsample_mask(mask_128, sz2)                    # (64, 64) ∈ {0,1}
+    # --- Downsample 128×128 reference image (mask-aware) and mask -----------
+    # See mask_aware_downsample docstring: normalised convolution prevents
+    # zero-valued missing pixels from biasing the downsampled observed pixels.
+    img_64     = mask_aware_downsample(img_corrupt, mask_128, sz2)  # (64, 64)
+    mask_64    = downsample_mask(mask_128, sz2)                     # (64, 64) ∈ {0,1}
     img_64_zero = img_64 * mask_64
     results['mask_64'] = mask_64
 
