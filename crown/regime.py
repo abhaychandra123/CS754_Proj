@@ -17,7 +17,7 @@ the hole Omega^c via biharmonic extension and Gaussian-smoothed.
 from __future__ import annotations
 
 import numpy as np
-from scipy.ndimage import uniform_filter, gaussian_filter
+from scipy.ndimage import uniform_filter, gaussian_filter, binary_erosion
 from skimage.restoration import inpaint_biharmonic
 from skimage.util import view_as_windows
 from scipy.fft import dctn
@@ -154,13 +154,48 @@ def compute_regime_map(
     if window < 3 or window % 2 == 0:
         raise ValueError(f"window must be odd and >=3, got {window}")
 
-    # 1-2. Features and per-feature normalisation
+    # 1. Compute features on the whole (zero-filled) image.
+    #
+    # Features computed at observed pixels NEAR a hole are biased: the
+    # window centred on such a pixel may receive contributions from hole
+    # pixels, producing a spurious gradient/anisotropy/entropy spike.  We
+    # therefore build a TRUST MASK that marks observed pixels whose entire
+    # *effective feature support* lies inside Omega.
+    #
+    # Effective support per feature
+    # -----------------------------
+    #   spectral entropy : direct (window x window) DCT over y
+    #                       -> needs window x window of observed y.
+    #   gradient energy  : uniform_filter(|grad y|, window) where
+    #                      grad uses ±1 finite differences
+    #                       -> needs (window + 2) x (window + 2) of observed y.
+    #   structure tensor : uniform_filter(grad y . grad y, window)
+    #                       -> needs (window + 2) x (window + 2) of observed y.
+    #
+    # We take the worst case (window + 2) so that NO feature at a trusted
+    # pixel can have its computation reach a hole pixel, even via the
+    # gradient stencil's ±1 extension.
     g = _gradient_energy(y, window)
     a = _structure_anisotropy(y, window)
     h = _spectral_entropy(y, window)
 
-    g_min, g_max = float(g.min()), float(g.max())
-    g_n = (g - g_min) / (g_max - g_min + 1e-10)
+    trust_size   = window + 2
+    trust_struct = np.ones((trust_size, trust_size), dtype=bool)
+    trust = binary_erosion(M.astype(bool), structure=trust_struct)
+
+    if not trust.any():
+        # The hole is so large that no observed pixel has a fully-observed
+        # window.  Fall back to using all observed pixels (still better than
+        # using the hole pixels).
+        trust = M.astype(bool)
+
+    # 2. Normalise the gradient feature using ONLY the trust region.
+    # The structure-tensor anisotropy and DCT entropy are already in [0, 1]
+    # by construction, so they are not re-normalised.
+    g_trust = g[trust]
+    g_min   = float(g_trust.min())
+    g_max   = float(g_trust.max())
+    g_n     = np.clip((g - g_min) / (g_max - g_min + 1e-10), 0.0, 1.0)
 
     # 3. Linear combination with renormalised weights
     w_g, w_a, w_h = weights
@@ -170,17 +205,16 @@ def compute_regime_map(
     r_raw = (w_g / w_sum) * g_n + (w_a / w_sum) * a + (w_h / w_sum) * h
     r_raw = np.clip(r_raw, 0.0, 1.0)
 
-    # 4. Propagate from Omega into Omega^c.
-    # Biharmonic extension is exactly the inpaint_biharmonic call that we use
-    # for the image itself, applied to the regime map: it minimises bending
-    # energy in the hole subject to matching the observed regime values on
-    # the boundary.
-    bh_mask = (M == 0).astype(bool)
-    if bh_mask.any():
-        r_prop = inpaint_biharmonic(r_raw, bh_mask)
-        # Restore observed values exactly (biharmonic only touches the hole;
-        # this is belt-and-suspenders).
-        r_prop = np.where(M == 1, r_raw, r_prop)
+    # 4. Propagate from the TRUST region into everything else (hole + near-
+    # boundary observed band).  The trust complement is the union of
+    # Omega^c and the boundary band; biharmonic extension fills it from
+    # the trusted boundary inward.
+    propagate_mask = ~trust                          # True wherever r_raw is unreliable
+    if propagate_mask.any():
+        r_prop = inpaint_biharmonic(r_raw, propagate_mask)
+        # Restore the trusted-region values exactly (biharmonic does not
+        # modify them, but be explicit).
+        r_prop = np.where(trust, r_raw, r_prop)
     else:
         r_prop = r_raw
 

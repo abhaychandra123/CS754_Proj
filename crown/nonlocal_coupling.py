@@ -1,26 +1,39 @@
 """
-Nonlocal coefficient coupling (CROWN-Inpaint section 6.5).
+Nonlocal coefficient coupling (CROWN-Inpaint section 6.5) -- corrected.
 
 Independent OMP can pick different atoms for very similar patches.  Following
 CSR (Dong-Zhang-Shi 2011) and GSR (Zhang-Zhao-Gao 2014), we regularise each
 patch's code toward the weighted mean of its nearest-neighbour codes:
 
-    beta_p = (1 / Z_p) sum_{q in N(p)} w_pq alpha_q,    w_pq = exp(-||x_p - x_q||^2 / h^2)
-
-    alpha_p^* = argmin || W_p^(1/2) . (x_p - D alpha) ||^2 + lambda || alpha - beta_p ||_1
+    beta_p   = (1 / Z_p) sum_{q in N(p)} w_pq alpha_q
+    alpha_p* = argmin || W_p^(1/2) . (x_p - D alpha) ||^2 + lambda || alpha - beta_p ||_1
 
 The refinement is restricted to the OMP support of patch p (Section 6.5.2),
 turning a K-dimensional convex L1 problem into an |S|-dimensional one with
 |S| <= s.  Solved by ISTA initialised at beta_S.
 
+Distance metrics (Section 6.5.2) -- this implementation uses TWO weighted
+distances faithfully derived from the spec:
+
+  (1) NN search uses  d_nn^2(p, q) = sum_j  W_p[j] * (x_p[j] - x_q[j])^2,
+      i.e. Euclidean distance restricted to the OBSERVED coordinates of the
+      query patch p.  This is what spec 6.5.2 calls "Euclidean distance
+      restricted to observed coordinates of p".
+
+  (2) Similarity weights use  d_sim^2(p, q) = sum_j W_p[j] W_q[j] (x_p[j] - x_q[j])^2,
+      i.e. coordinates that are confidently observed in BOTH patches contribute
+      to the similarity score, as required by Section 6.5.2 ("uses W_p . W_q").
+
 Cadence: applied every two outer iterations (Section 6.5.3); the first
 iteration uses pure OMP without coupling.
+
+The routine returns Alpha unchanged when K_nl <= 0 (treated as the explicit
+"no nonlocal" ablation knob mentioned in spec Section 10.3).
 """
 
 from __future__ import annotations
 
 import numpy as np
-from sklearn.neighbors import NearestNeighbors
 
 
 # ---------------------------------------------------------------------------
@@ -36,57 +49,33 @@ def _l1_centralised_refine(
     n_ista: int = 20,
 ) -> np.ndarray:
     """
-    Solve, for a single patch, with support S already chosen:
+    Solve, for a single patch with support S already chosen:
 
         min_{alpha_S}   || W^(1/2) . (x - D_S alpha_S) ||_2^2
                        + lambda || alpha_S - beta_S ||_1
 
-    via ISTA initialised at beta_S.  Each ISTA step is
-
-        z          = alpha - eta * 2 A^T (A alpha - b)
-        alpha_new  = beta_S + soft( z - beta_S, eta * lambda )
-
-    where  A = diag(sqrt(W)) D_S,  b = sqrt(W) . x,  and  eta = 1 / L  with
-    L = 2 * lambda_max(A^T A) (the Lipschitz constant of the smooth term's
-    gradient).  Convergence is linear once we are inside the active orthant,
-    and the support is small (|S| <= s = 10), so n_ista = 20 is overkill.
-
-    Parameters
-    ----------
-    x      : (n,)      patch values
-    D_S    : (n, |S|)  dictionary restricted to active support
-    W      : (n,)      pixel weights (no square root applied yet)
-    beta_S : (|S|,)    centring target
-    lam    : float     L1 weight
-    n_ista : int       inner iterations
-
-    Returns
-    -------
-    alpha_S : (|S|,)   refined coefficients
+    via ISTA initialised at beta_S.
     """
     s_size = D_S.shape[1]
     if s_size == 0:
         return np.zeros(0)
 
     w = np.sqrt(np.clip(W, 0.0, None))
-    A = w[:, None] * D_S                                 # (n, |S|)
-    b = w * x                                            # (n,)
+    A = w[:, None] * D_S
+    b = w * x
 
-    AtA = A.T @ A                                        # (|S|, |S|)
-    Atb = A.T @ b                                        # (|S|,)
+    AtA = A.T @ A
+    Atb = A.T @ b
 
-    # Lipschitz constant for grad of f(alpha) = ||A alpha - b||^2 is 2 ||A^T A||_2.
-    # eigvalsh returns sorted ascending; the largest is the operator norm.
     eigvals = np.linalg.eigvalsh(AtA)
     L = 2.0 * float(eigvals[-1])
     if L < 1e-10:
-        # Degenerate (all-zero columns); just return the centring target.
         return beta_S.copy()
     eta = 1.0 / L
 
     alpha = beta_S.copy()
     for _ in range(n_ista):
-        grad     = 2.0 * (AtA @ alpha - Atb)             # gradient of smooth part
+        grad     = 2.0 * (AtA @ alpha - Atb)
         z        = alpha - eta * grad
         delta    = z - beta_S
         thresh   = eta * lam
@@ -94,6 +83,64 @@ def _l1_centralised_refine(
         alpha    = beta_S + delta_st
 
     return alpha
+
+
+# ---------------------------------------------------------------------------
+# Per-query weighted Euclidean nearest-neighbour search
+# ---------------------------------------------------------------------------
+
+def _weighted_nn_search(
+    X: np.ndarray,
+    W: np.ndarray,
+    K_nl: int,
+) -> tuple:
+    """
+    For each query patch p, find K_nl nearest patches under the metric
+
+        d_nn^2(p, q) = sum_j  W[j, p] * (X[j, p] - X[j, q])^2
+
+    i.e. weighted Euclidean using the QUERY's per-pixel weights, with
+    self excluded.  Implemented as a per-query Python loop over patches;
+    each iteration is fully vectorised over the candidate set.
+
+    Parameters
+    ----------
+    X : (n, N) float64    Patch matrix.
+    W : (n, N) float64    Per-pixel weights for every patch.
+    K_nl : int            Number of neighbours per query (excluding self).
+
+    Returns
+    -------
+    indices  : (N, K_nl) int64    Neighbour indices.
+    sq_dists : (N, K_nl) float64  Distances squared in the per-query metric.
+    """
+    n, N = X.shape
+    if K_nl < 1:
+        raise ValueError(f"K_nl must be >= 1, got {K_nl}")
+    if K_nl > N - 1:
+        K_nl = N - 1
+
+    indices  = np.zeros((N, K_nl), dtype=np.int64)
+    sq_dists = np.zeros((N, K_nl), dtype=np.float64)
+
+    for p in range(N):
+        diff_sq = (X - X[:, p:p + 1]) ** 2                # (n, N)
+        dist    = (W[:, p:p + 1] * diff_sq).sum(axis=0)    # (N,)
+        dist[p] = np.inf                                   # exclude self
+
+        # argpartition gives an unsorted top-K; sort just those for
+        # deterministic ordering.
+        if K_nl < N:
+            top_idx = np.argpartition(dist, K_nl)[:K_nl]
+            order   = np.argsort(dist[top_idx])
+            top_idx = top_idx[order]
+        else:
+            top_idx = np.argsort(dist)[:K_nl]
+
+        indices[p]  = top_idx
+        sq_dists[p] = dist[top_idx]
+
+    return indices, sq_dists
 
 
 # ---------------------------------------------------------------------------
@@ -113,49 +160,38 @@ def nonlocal_refine(
     """
     Apply one full pass of nonlocal coefficient coupling to all patches.
 
-    Implementation notes
-    --------------------
-    * Nearest-neighbour search is brute-force Euclidean on full 64-d
-      patch vectors (sklearn `NearestNeighbors` with `algorithm='brute'`).
-      For ~15k patches this completes in a few seconds.  The spec
-      (Section 6.5.2) suggests masked-Euclidean using only confidently
-      observed coordinates; using full-Euclidean is a pragmatic v1
-      simplification that becomes accurate as iterations progress (hole
-      values stabilise across all patches similarly).
-    * Self-match (the patch's own index, distance 0) is dropped before
-      computing the group centre.
-    * The bandwidth `h` defaults to the median NN distance, an adaptive
-      choice that scales gracefully across images.
+    Algorithm (Section 6.5)
+    -----------------------
+    1. For each patch p, find K_nl nearest neighbours under the
+       per-query weighted distance d_nn^2(p, q) = sum_j W_p[j] (x_p - x_q)_j^2.
+    2. For each (p, q) pair, recompute the SIMILARITY weight using the
+       coordinates confidently observed in BOTH patches (W_p . W_q):
 
-    Parameters
-    ----------
-    X_filled  : (n, N) float64
-        Patch matrix at the current iteration (no NaN; hole positions
-        carry their current estimate).
-    Alpha : (K, N) float64
-        Sparse codes from the OMP step (column p = code for patch p).
-    W_patches : (n, N) float64
-        Per-pixel weights used during OMP for each patch (continuous in
-        [0, 1]; corresponds to W_p in the spec).
-    D : (n, K) float64
-        Dictionary.
-    K_nl : int
-        Number of nearest neighbours per patch (excluding self).
-    h : float or None
-        Similarity bandwidth.  If None, set to the median NN distance.
-    lam : float
-        L1 centring weight (lambda in the spec).
-    n_ista : int
-        Inner ISTA iterations per patch.
+           w_pq    = exp(- d_sim^2(p, q) / h^2)
+           d_sim^2 = sum_j W_p[j] W_q[j] (x_p - x_q)_j^2
 
-    Returns
-    -------
-    Alpha_new : (K, N) float64
-        Refined sparse codes.  Patches with empty original support are
-        left at zero.
+       This matches the spec's "uses W_p . W_q" definition.
+    3. Group centre  beta_p = (1 / Z_p) sum_q w_pq alpha_q.
+    4. Per-patch L1-centred refinement on the OMP support via ISTA.
+
+    Bandwidth `h`
+    -------------
+    If None, h is set so that h^2 = max(median(d_sim^2), 1e-6).  This is an
+    iteration-adaptive default that scales with the typical similarity
+    distance among kept neighbours.
+
+    No-op behaviour
+    ---------------
+    If K_nl <= 0 or N <= 1 the call is an exact identity: Alpha is returned
+    unchanged.  This is the "no nonlocal" ablation knob from spec
+    Section 10.3.
     """
     n, N = X_filled.shape
     K    = Alpha.shape[0]
+
+    # ---- 0. No-op early return ----------------------------------------
+    if K_nl <= 0 or N <= 1:
+        return Alpha.copy()
 
     if Alpha.shape[1] != N:
         raise ValueError(
@@ -170,37 +206,44 @@ def nonlocal_refine(
             f"D shape {D.shape} inconsistent with patches/atoms ({n}, {K})"
         )
 
-    # ---- 1. Nearest-neighbour search -----------------------------------
-    nn = NearestNeighbors(
-        n_neighbors=min(K_nl + 1, N),
-        algorithm="brute",
-        metric="euclidean",
-    )
-    nn.fit(X_filled.T)                                  # (N, n)
-    distances, indices = nn.kneighbors(X_filled.T)
-    # Drop the self-match (col 0; sklearn returns sorted ascending)
-    distances = distances[:, 1:]                         # (N, K_nl)
-    indices   = indices[:, 1:]                           # (N, K_nl)
+    # ---- 1. Weighted-Euclidean NN search per query --------------------
+    indices, _ = _weighted_nn_search(X_filled, W_patches, K_nl)
+    K_nl_eff   = indices.shape[1]   # may be smaller than K_nl when N is tiny
 
+    # ---- 2. Similarity weights using W_p . W_q ------------------------
+    # nbr_X[:, p, k] = X[:, indices[p, k]]
+    nbr_X = X_filled[:, indices]                      # (n, N, K_nl_eff)
+    nbr_W = W_patches[:, indices]                     # (n, N, K_nl_eff)
+
+    # diff[:, p, k]   = X_filled[:, p] - nbr_X[:, p, k]
+    diff = X_filled[:, :, None] - nbr_X                # (n, N, K_nl_eff)
+
+    # W_pq[:, p, k] = W_patches[:, p] * W_patches[:, indices[p, k]]
+    W_pq = W_patches[:, :, None] * nbr_W               # (n, N, K_nl_eff)
+
+    # d_sim^2(p, k) = sum_j W_pq[j, p, k] * diff[j, p, k]^2
+    d_sim_sq = (W_pq * diff * diff).sum(axis=0)        # (N, K_nl_eff)
+
+    # Adaptive bandwidth: h^2 = median(d_sim^2)
     if h is None:
-        med_d = float(np.median(distances))
-        h = max(med_d, 1e-3)
+        med = float(np.median(d_sim_sq))
+        h_sq = max(med, 1e-6)
+    else:
+        h_sq = float(h) ** 2
 
-    # ---- 2. Per-row similarity weights (sum to 1) ----------------------
-    weights = np.exp(-(distances ** 2) / (h ** 2))       # (N, K_nl)
-    Z       = weights.sum(axis=1, keepdims=True)
-    safe_Z  = np.where(Z < 1e-12, 1.0, Z)
-    weights = weights / safe_Z                           # row-stochastic
+    weights_pq = np.exp(-d_sim_sq / h_sq)               # (N, K_nl_eff)
+    Z          = weights_pq.sum(axis=1, keepdims=True)
+    safe_Z     = np.where(Z < 1e-12, 1.0, Z)
+    weights_pq = weights_pq / safe_Z                    # row-stochastic
 
-    # ---- 3. Group centres beta_p = sum_q w_pq alpha_q ------------------
-    # Alpha[:, indices] has shape (K, N, K_nl); weight along the K_nl axis.
-    alpha_nbr = Alpha[:, indices]                        # (K, N, K_nl)
-    beta      = (alpha_nbr * weights[None, :, :]).sum(axis=2)   # (K, N)
+    # ---- 3. Group centres beta_p = sum_q w_pq alpha_q -----------------
+    alpha_nbr = Alpha[:, indices]                      # (K, N, K_nl_eff)
+    beta      = (alpha_nbr * weights_pq[None, :, :]).sum(axis=2)   # (K, N)
 
-    # ---- 4. Per-patch L1-centred refinement on the OMP support ---------
+    # ---- 4. Per-patch L1-centred refinement on the OMP support --------
     Alpha_new = np.zeros_like(Alpha)
     for p in range(N):
-        S = np.flatnonzero(Alpha[:, p])                  # support of patch p
+        S = np.flatnonzero(Alpha[:, p])
         if S.size == 0:
             continue
         alpha_S = _l1_centralised_refine(

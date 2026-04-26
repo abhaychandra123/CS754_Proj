@@ -248,7 +248,7 @@ def masked_omp(x, D, mask, s):
 # PHASE 2B — Masked K-SVD: ALS Rank-1 Dictionary Update
 # =============================================================================
 
-def masked_ksvd_update_atom(D, Alpha, X, Masks, k_idx, als_iters=15):
+def masked_ksvd_update_atom(D, Alpha, X, Masks, k_idx, als_iters=15, rng=None):
     """
     Update one dictionary atom via Masked Rank-1 ALS Approximation.
 
@@ -314,12 +314,20 @@ def masked_ksvd_update_atom(D, Alpha, X, Masks, k_idx, als_iters=15):
     n, K = D.shape
     N    = Alpha.shape[1]
 
+    # Reproducible RNG: if no rng is provided, fall back to a fresh default
+    # generator (NOT the legacy global np.random state, which is process-wide
+    # and would leak randomness across calls).  Callers seeking strict
+    # determinism should pass a seeded `np.random.Generator` from the outer
+    # K-SVD loop.
+    if rng is None:
+        rng = np.random.default_rng()
+
     # ---- Active set S_k: signals whose code has a nonzero at atom k_idx ----
     S_k = np.where(Alpha[k_idx, :] != 0)[0]   # shape: (|S_k|,)
 
     if len(S_k) == 0:
-        # Atom unused -> reinitialise to a random unit vector
-        d_k = np.random.standard_normal(n)
+        # Atom unused -> reinitialise to a random unit vector via the seeded rng
+        d_k = rng.standard_normal(n)
         d_k /= np.linalg.norm(d_k)
         return d_k, np.zeros(N)
 
@@ -389,8 +397,8 @@ def masked_ksvd_update_atom(D, Alpha, X, Masks, k_idx, als_iters=15):
         h_k = h_k * norm_d        # h_k[i] <- h_k[i] * ||d_k||_2
         d_k = d_k / norm_d        # d_k <- d_k / ||d_k||_2
     else:
-        # Degenerate atom -> reinitialise randomly
-        d_k = np.random.standard_normal(n)
+        # Degenerate atom -> reinitialise randomly via the seeded rng
+        d_k = rng.standard_normal(n)
         d_k /= np.linalg.norm(d_k)
         h_k = np.zeros(len(S_k))
 
@@ -454,7 +462,7 @@ def masked_ksvd(X, Masks, K, s, n_iter=20, als_iters=15, seed=42, label="Masked 
         # ------------------------------------------------------------------
         for k_idx in range(K):
             d_k_new, h_k_new = masked_ksvd_update_atom(
-                D, Alpha, X, Masks, k_idx, als_iters=als_iters
+                D, Alpha, X, Masks, k_idx, als_iters=als_iters, rng=rng
             )
             D[:, k_idx]     = d_k_new
             Alpha[k_idx, :] = h_k_new
@@ -507,7 +515,8 @@ def baseline_ksvd(X, Masks, K, s, n_iter=20, als_iters=15, seed=42):
 
         for k_idx in range(K):
             d_k_new, h_k_new = masked_ksvd_update_atom(
-                D, Alpha, X_imputed, all_ones, k_idx, als_iters=als_iters
+                D, Alpha, X_imputed, all_ones, k_idx, als_iters=als_iters,
+                rng=rng,
             )
             D[:, k_idx]     = d_k_new
             Alpha[k_idx, :] = h_k_new

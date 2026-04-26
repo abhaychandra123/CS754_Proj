@@ -19,27 +19,26 @@ import os
 import sys
 import time
 import numpy as np
-from sklearn.feature_extraction.image import extract_patches_2d
 
-# Project root on sys.path so we can import the existing modules
+# Project root on sys.path so we can import `masked_ksvd` (the K-SVD trainer
+# from Phases 1-2 of the project).  We deliberately do NOT import from
+# `inpainting_multiscale_masked_ksvd`: that module pulls matplotlib in at
+# load time, and CROWN should be a plotting-free library.
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJ_ROOT = os.path.dirname(_THIS_DIR)
 if _PROJ_ROOT not in sys.path:
     sys.path.insert(0, _PROJ_ROOT)
 
 from masked_ksvd import masked_ksvd                                  # noqa: E402
-from inpainting_multiscale_masked_ksvd import (                      # noqa: E402
-    extract_and_translate_patches,
-    reconstruct_image_from_codes,
-    PATCH_SIZE,
-    PATCH_DIM,
-    N_ATOMS,
-    SPARSITY,
-    ALS_ITERS,
-)
 
-# CROWN sub-modules
-from crown.smooth            import biharmonic_init, harmonic_relax
+# CROWN sub-modules (self-contained)
+from crown.utils             import (
+    PATCH_SIZE, PATCH_DIM,
+    DEFAULT_N_ATOMS, DEFAULT_SPARSITY, DEFAULT_ALS_ITERS,
+    extract_features_first, extract_patches_with_mask,
+    reconstruct_image_from_codes,
+)
+from crown.smooth            import biharmonic_init, biharmonic_relax
 from crown.regime            import compute_regime_map
 from crown.confidence        import compute_confidence_map, overlap_mean_and_variance
 from crown.weighted_omp      import build_weight_image, weighted_omp_batch
@@ -51,21 +50,6 @@ from crown.manifold          import manifold_correct, schedule_sigma
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _extract_features_first(image: np.ndarray,
-                            patch_shape: tuple = PATCH_SIZE) -> np.ndarray:
-    """
-    Extract all overlapping patches and return a (p*p, N) array.
-
-    Equivalent to the (X_filled output of `extract_and_translate_patches`
-    when called with an all-ones mask), but avoids the redundant NaN-
-    injection branch.  Reuses sklearn's patch extractor for consistency
-    with the rest of the codebase.
-    """
-    raw = extract_patches_2d(image, patch_shape)                # (N, p, p)
-    N   = raw.shape[0]
-    return raw.reshape(N, -1).T                                  # (p*p, N)
-
 
 def _hard_project(u_bar: np.ndarray, y: np.ndarray, M: np.ndarray) -> np.ndarray:
     return np.where(M == 1, y, u_bar)
@@ -96,9 +80,9 @@ def train_dictionary(
     M: np.ndarray,
     n_train: int = 3000,
     n_iter: int = 25,
-    K: int = N_ATOMS,
-    sparsity: int = SPARSITY,
-    als_iters: int = ALS_ITERS,
+    K: int = DEFAULT_N_ATOMS,
+    sparsity: int = DEFAULT_SPARSITY,
+    als_iters: int = DEFAULT_ALS_ITERS,
     seed: int = 42,
     verbose: bool = True,
 ) -> tuple:
@@ -122,7 +106,7 @@ def train_dictionary(
     train_err : (n_iter,)         Masked-RMSE convergence curve.
     """
     img_zero = y * M
-    _, X_nan_all, M_all, N = extract_and_translate_patches(img_zero, M)
+    _, X_nan_all, M_all, N = extract_patches_with_mask(img_zero, M)
 
     rng = np.random.default_rng(seed)
     idx = rng.choice(N, size=min(n_train, N), replace=False)
@@ -165,7 +149,7 @@ def run_crown_inpaint(
     T: int = 5,
     eps_stop: float = 1e-4,
     # Sparse branch
-    sparsity: int = SPARSITY,
+    sparsity: int = DEFAULT_SPARSITY,
     # Smooth branch
     K_s: int = 10,
     # Confidence map
@@ -335,8 +319,8 @@ def run_crown_inpaint(
         # ---- B.2 sparse branch -------------------------------------------
         # Build the per-pixel weight image and extract patches.
         W_img = build_weight_image(M, c_map)
-        X_pat = _extract_features_first(u,     PATCH_SIZE)              # (n, N)
-        W_pat = _extract_features_first(W_img, PATCH_SIZE)              # (n, N)
+        X_pat = extract_features_first(u,     PATCH_SIZE)               # (n, N)
+        W_pat = extract_features_first(W_img, PATCH_SIZE)               # (n, N)
 
         Alpha = weighted_omp_batch(
             X_pat, D, W_pat, sparsity,
@@ -360,7 +344,7 @@ def run_crown_inpaint(
         u_sparse = reconstruct_image_from_codes(D, Alpha, u.shape)
 
         # ---- B.4 smooth branch -------------------------------------------
-        u_smooth = harmonic_relax(u, y, M, K_s=K_s)
+        u_smooth = biharmonic_relax(u, y, M, K_s=K_s)
 
         # ---- B.5 fuse + project ------------------------------------------
         u_bar = fuse_and_project(u_smooth, u_sparse, r_map, M, y)
