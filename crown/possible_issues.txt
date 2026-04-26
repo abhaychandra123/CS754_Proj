@@ -1,0 +1,25 @@
+Findings
+
+High: regime map is mathematically wrong around holes.
+run.py (line 261) passes y * M into compute_regime_map, and regime.py (line 157) computes gradient/anisotropy/DCT features on that zero-filled image before propagation. This violates the spec’s “computed on observed image only, then propagated” requirement. On a constant 0.5 image with a square hole, the hole regime mean becomes 0.566, i.e. it classifies a perfectly smooth hole as textured. This directly breaks the core CROWN idea because fusion will over-select the sparse branch in smooth holes.
+
+High: the smooth-branch guarantee is false.
+The spec claims smooth-only should not get meaningfully worse than biharmonic, but smooth.py (line 102) repeatedly applies harmonic Jacobi relaxation after biharmonic initialization. Harmonic relaxation converges to the harmonic solution, not the biharmonic one. On a quadratic smooth image, biharmonic reconstructed the hole essentially exactly, while 10 Jacobi steps increased hole MSE to 1.28e-6, and 500 steps to 1.76e-4. This contradicts CROWN_Inpaint_specification.md (line 480).
+
+Medium-High: nonlocal coupling does not implement the specified weighted neighbor search.
+nonlocal_coupling.py (line 173) uses full Euclidean distance on filled patches and ignores W_patches for neighbor selection/weights. The spec wants similarity over confidently observed shared coordinates. Early iterations can therefore group patches because of unreliable biharmonic/zero-filled hole content, exactly the failure confidence weighting was meant to prevent.
+
+Medium: K_nl=0 is not a no-op.
+The spec explicitly lists K_nl=0 as “no nonlocal”, but nonlocal_coupling.py (line 174) still runs nearest-neighbor with one self-neighbor, drops it, gets empty distances, then refines toward zero-ish group centers. My smoke test returned a changed code matrix with norm ratio 0.718, not the original codes. This will corrupt ablation sweeps unless nonlocal_enabled=False is used.
+
+Medium: dictionary training is not fully reproducible.
+train_dictionary(..., seed=...) passes a seed, but the underlying atom reinitialization in masked_ksvd.py (line 320) and masked_ksvd.py (line 391) uses global np.random.standard_normal, not the seeded generator. Runs can differ when atoms are unused/degenerate.
+
+Medium: the public CROWN API is tied to the old script globals.
+run.py (line 31) imports constants and reconstruction utilities from inpainting_multiscale_masked_ksvd.py, including PATCH_DIM, N_ATOMS, and SPARSITY. This makes CROWN fixed to 8x8 patches and inherits N_ATOMS=512, while the spec default says 256. It also makes importing CROWN require plotting dependencies from the old experiment script path.
+
+What Looks Correct
+Weighted OMP is the strongest part. The diagonal weighting and weighted least-squares solve in weighted_omp.py (line 117) are mathematically right, and I verified it matches the existing binary masked_omp exactly for binary masks. fuse_and_project also preserves observed pixels exactly in the smoke run.
+
+Verification
+I ran read-only smoke checks under cs754_proj/venv: weighted OMP equivalence passed, nonlocal shape behavior passed for normal K_nl, and a synthetic one-iteration CROWN run had hard-constraint max error 0.0. No code was changed.

@@ -127,7 +127,7 @@ HOLE_C0, HOLE_C1 = 55, 75     # col slice  [C0, C1)  → 20 cols
 # Dictionary learning
 PATCH_SIZE   = (8, 8)
 PATCH_DIM    = 64              # 8*8
-N_ATOMS      = 512             # 4× overcomplete  (256 > 64)
+N_ATOMS      = 256             # 4× overcomplete  (256 > 64)
 SPARSITY     = 10              # nonzeros per patch code
 ALS_ITERS    = 10              # ALS steps inside each masked_ksvd_update_atom
 
@@ -165,7 +165,7 @@ def load_image() -> np.ndarray:
     """
     Load the reference grayscale image, resize to 128×128, float [0,1].
     """
-    raw   = skdata.brick()                                        # (512,512) uint8
+    raw   = skdata.camera()                                        # (512,512) uint8
     img   = sk_resize(raw.astype(np.float64) / 255.0,
                       IMAGE_SIZE, anti_aliasing=True)               # (128,128) float64
     return img
