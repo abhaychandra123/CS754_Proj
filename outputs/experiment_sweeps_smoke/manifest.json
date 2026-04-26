@@ -1,0 +1,75 @@
+{
+  "aggregate_csv": "outputs/experiment_sweeps_smoke/aggregate.csv",
+  "args": {
+    "K_values": null,
+    "crown_T": null,
+    "dict_iters": null,
+    "dry_run": false,
+    "images": null,
+    "masks": null,
+    "max_runs": null,
+    "methods": "all",
+    "n_train": null,
+    "no_sensitivity": false,
+    "out_dir": "outputs/experiment_sweeps_smoke",
+    "profile": "smoke",
+    "resume": true,
+    "seeds": null,
+    "sparsity": null,
+    "verbose": false
+  },
+  "completed_before_run": 7,
+  "config": {
+    "K": [
+      32
+    ],
+    "K_s": 1,
+    "als_iters": 2,
+    "crown_T": [
+      1
+    ],
+    "dict_iters": [
+      1
+    ],
+    "images": [
+      "brick"
+    ],
+    "include_sensitivity": false,
+    "masks": [
+      "random_p30"
+    ],
+    "methods": [
+      "biharmonic",
+      "zero_ksvd",
+      "masked_ksvd",
+      "multiscale_ksvd",
+      "crown_full",
+      "crown_no_nonlocal",
+      "crown_sparse_only"
+    ],
+    "n_train": [
+      100
+    ],
+    "profile": "smoke",
+    "seeds": [
+      42
+    ],
+    "sparsity": [
+      3
+    ]
+  },
+  "created_at": "2026-04-26T14:33:40+00:00",
+  "dry_run": false,
+  "failed_this_invocation": 0,
+  "finished_at": "2026-04-26T14:33:40+00:00",
+  "pending_before_cap": 0,
+  "pending_executed": 0,
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "plots_dir": "outputs/experiment_sweeps_smoke/plots",
+  "python": "3.13.5 (main, Jun 11 2025, 15:36:57) [Clang 17.0.0 (clang-1700.0.13.3)]",
+  "resume": true,
+  "runs_csv": "outputs/experiment_sweeps_smoke/runs.csv",
+  "script_version": "1.0",
+  "succeeded_this_invocation": 0,
+  "total_specs": 7
+}
