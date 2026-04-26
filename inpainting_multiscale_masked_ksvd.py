@@ -165,7 +165,7 @@ def load_image() -> np.ndarray:
     """
     Load the reference grayscale image, resize to 128×128, float [0,1].
     """
-    raw   = skdata.camera()                                        # (512,512) uint8
+    raw   = skdata.brick()                                        # (512,512) uint8
     img   = sk_resize(raw.astype(np.float64) / 255.0,
                       IMAGE_SIZE, anti_aliasing=True)               # (128,128) float64
     return img
