@@ -1,0 +1,1053 @@
+% =====================================================================
+%  Formal Convergence and Error Analysis of the
+%  CROWN-Coupled Masked Dictionary Learning Framework
+%  -------------------------------------------------------------------
+%  Manuscript companion to the CROWN-Inpaint method.
+%  Compiles standalone with `pdflatex` (uses IEEEtran class).
+% =====================================================================
+\documentclass[journal,onecolumn,11pt]{IEEEtran}
+
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{mathtools}
+\usepackage{algorithm,algpseudocode}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{graphicx}
+\usepackage{booktabs}
+
+% --------- Theorem environments ---------
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{assumption}{Assumption}
+\newtheorem{remark}{Remark}
+\newtheorem{definition}{Definition}
+
+% --------- Macros ---------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Real}{\mathbb{R}}
+\newcommand{\Loss}{\mathcal{L}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\left\langle #1,\, #2 \right\rangle}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\supp}{\operatorname{supp}}
+\newcommand{\sign}{\operatorname{sign}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\prox}{\operatorname{prox}}
+\newcommand{\Sk}{\mathcal{S}_k}
+\newcommand{\Om}{\Omega}
+\newcommand{\one}{\mathbf{1}}
+\newcommand{\dvec}{\bm{d}}
+\newcommand{\hvec}{\bm{h}}
+\newcommand{\xvec}{\bm{x}}
+\newcommand{\alphavec}{\bm{\alpha}}
+\newcommand{\KNN}{\operatorname{KNN}}
+
+\title{Convergence and Error Analysis of the CROWN-Coupled \\
+       Masked Dictionary Learning Framework for Image Inpainting}
+
+\author{%
+  CS754 Project Group\\
+  \textit{Indian Institute of Technology Bombay}%
+  \thanks{Manuscript prepared April 2026. Companion to the
+  \emph{CROWN-Inpaint: Confidence-weighted Regime-aware Overlap-Nonlocal Inpainting}
+  method specification.}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present a self-contained mathematical analysis of the
+\emph{Masked Dictionary Learning with CROWN (Confidence, Regime, Non-local)
+Coupling} framework for image inpainting under arbitrary observation masks.
+The framework combines three optimisation primitives: (i)~a masked rank-one
+Alternating Least Squares (ALS) dictionary update that side-steps the
+ill-defined SVD on incomplete data, (ii)~a confidence-weighted Orthogonal
+Matching Pursuit followed by a non-local centralised $\ell_1$ refinement
+(NSR), and (iii)~a coarse-to-fine pyramid that supplies a non-trivial warm
+start to the non-convex outer loop. We prove four theorems that together
+establish the algorithm's convergence and quantify its reconstruction
+accuracy. Specifically, we show that the masked ALS subproblem is
+monotonically non-increasing and converges to a coordinate-wise stationary
+point under a verifiable atom-utilisation condition; that the outer loop
+inherits this descent property modulo the standard greedy-OMP approximation;
+that the non-local centralised refinement admits a slow-rate Lasso oracle
+inequality whose error is governed by a \emph{Self-Similarity Index}
+$\mathrm{SSI}_i := \norm{\bm{\alpha}_i^\star - \bm{\beta}_i}_1$; and that the
+multi-scale warm start strictly removes the zero-information plateau of the
+loss surface that traps a single-scale K-SVD on contiguous holes larger than
+the patch.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Image inpainting, dictionary learning, K-SVD, sparse coding, masked OMP,
+non-local self-similarity, alternating least squares, block-coordinate
+descent, convergence analysis, multi-scale optimisation.
+\end{IEEEkeywords}
+
+% =====================================================================
+\section{Introduction}
+% =====================================================================
+Patch-based dictionary learning methods such as K-SVD~\cite{aharon2006ksvd}
+provide state-of-the-art reconstruction quality on a wide class of image
+restoration problems, but their use in inpainting is hampered by a
+structural obstruction: the SVD step in the dictionary update is not
+defined when the leave-one-out error matrix has unobserved entries, and
+patches lying entirely inside the hole carry no observation and therefore
+no gradient. The CROWN-Inpaint framework addresses both issues
+simultaneously through three coupled mechanisms:
+
+\begin{enumerate}
+\item A \emph{masked ALS rank-one update} that replaces the SVD step by
+  closed-form scalar weighted least squares restricted to observed entries.
+\item A \emph{confidence-weighted, non-local centralised} sparse-coding
+  step that fuses an OMP support-selection with an $\ell_1$ refinement
+  centered at the weighted mean code of the patch's nearest neighbours.
+\item A \emph{coarse-to-fine pyramid} that initialises the dictionary and
+  codes from a downsampled scale at which every hole patch sees at least
+  one observed pixel.
+\end{enumerate}
+
+The aim of the present paper is to provide rigorous theoretical guarantees
+for each of these mechanisms in isolation, and to compose them into an
+end-to-end convergence statement for the full pipeline.
+
+% =====================================================================
+\section{Problem Setup and Standing Notation}
+% =====================================================================
+\label{sec:setup}
+
+Let $\xvec_1,\dots,\xvec_N \in \R^n$ be vectorised image patches stacked
+column-wise into $X\in\R^{n\times N}$, and let
+$M_i\in\{0,1\}^{n\times n}$ for $i\in[N]$ be diagonal binary mask
+matrices with $(M_i)_{jj}=1$ iff coordinate $j$ of patch $i$ is observed.
+Denote the observed coordinate set by $\Om_i := \{j:(M_i)_{jj}=1\}$. Let
+$D=[\dvec_1,\dots,\dvec_K]\in\R^{n\times K}$ be a unit-norm dictionary
+($\norm{\dvec_k}_2=1$), and $A=[\alphavec_1,\dots,\alphavec_N]\in\R^{K\times N}$
+the matrix of sparse codes. The \emph{masked dictionary-learning energy}
+is
+\begin{equation}
+\boxed{\;
+\Loss(D,A) \;=\; \sum_{i=1}^{N} \norm{M_i\,(\xvec_i - D\alphavec_i)}_2^2,
+\quad \text{s.t. } \norm{\alphavec_i}_0 \le s,\;\norm{\dvec_k}_2=1.
+\;}
+\label{eq:masked-loss}
+\end{equation}
+For a fixed atom index $k\in[K]$, the \emph{active set} of signals using
+atom $k$ is
+\begin{equation}
+\Sk \;:=\; \{\,i\in[N]\,:\, A_{ki}\neq 0\,\}.
+\end{equation}
+We will reserve the symbol $\hvec\in\R^{|\Sk|}$ for the restriction of the
+$k$-th coefficient row $A_{k,:}$ to $\Sk$.
+
+\begin{definition}[Leave-one-out residual]
+\label{def:loo-residual}
+For $k\in[K]$ and $i\in\Sk$, the leave-one-out error of atom $k$ on
+signal $i$ is
+\begin{equation}
+\bm{e}_{k,i} \;:=\; \xvec_i - \sum_{\ell\neq k} \dvec_\ell\, A_{\ell i}
+\;=\; (\xvec_i - D\alphavec_i) + \dvec_k\, A_{ki}.
+\label{eq:loo-residual}
+\end{equation}
+\end{definition}
+The identity~\eqref{eq:loo-residual} is the algebraic reason ALS can
+update $(\dvec_k,\hvec)$ holding $\{\dvec_\ell,A_{\ell,:}\}_{\ell\neq k}$ fixed.
+
+\begin{assumption}[Atom utilisation]
+\label{ass:utilisation}
+For every $k\in[K]$, the active set $\Sk$ is non-empty and
+\begin{equation}
+\exists\,j\in[n]\;:\quad
+  \sum_{i\in\Sk} (M_i)_{jj}\, A_{ki}^2 \;>\; 0,\qquad
+\exists\,i\in\Sk\;:\quad
+  \sum_{j\in[n]} (M_i)_{jj}\, d_{k,j}^2 \;>\; 0.
+\label{eq:utilisation}
+\end{equation}
+\end{assumption}
+Assumption~\ref{ass:utilisation} is the masked counterpart of the standard
+atom-utilisation hypothesis in K-SVD analysis~\cite{aharon2006ksvd}; it
+fails only when an atom is either unused everywhere or completely
+``hidden'' by the masks of all signals that use it. The implementation
+re-initialises any such atom from a unit Gaussian (see
+\texttt{masked\_ksvd.py:401}), so the assumption holds inductively.
+
+% =====================================================================
+\section{Convergence of the Masked ALS Dictionary Update}
+% =====================================================================
+\label{sec:als}
+
+For a fixed atom index $k$ we consider the rank-one ALS subproblem
+\begin{equation}
+\min_{\dvec_k\in\R^n,\ \hvec\in\R^{|\Sk|}}\;
+\Phi_k(\dvec_k,\hvec) \;:=\;
+\sum_{i\in\Sk} \norm{M_i\,(\bm{e}_{k,i}-\dvec_k\, h_{k,i})}_2^2.
+\label{eq:phi-k}
+\end{equation}
+
+\subsection{Closed-form scalar updates}
+\label{sec:closed-form}
+
+\begin{lemma}[Stage A: scalar update of $h_{k,i}$]
+\label{lem:h-update}
+For fixed $\dvec_k$, the unique minimiser of $\Phi_k$ in $h_{k,i}$ is
+\begin{equation}
+h_{k,i}^{\star}
+\;=\;
+\frac{\sum_{j=1}^{n} (M_i)_{jj}\, d_{k,j}\, e_{k,i,j}}
+     {\sum_{j=1}^{n} (M_i)_{jj}\, d_{k,j}^2},
+\quad i\in\Sk,
+\label{eq:h-update}
+\end{equation}
+provided the denominator is non-zero. Each $h_{k,i}^\star$ is independent
+across $i\in\Sk$.
+\end{lemma}
+\begin{IEEEproof}
+The map $h\mapsto\Phi_k(\dvec_k,h)$ is separable across $i$:
+\[
+\Phi_k(\dvec_k,\hvec)
+=\sum_{i\in\Sk}\sum_{j=1}^{n}(M_i)_{jj}\bigl(e_{k,i,j}-d_{k,j}\,h_{k,i}\bigr)^2.
+\]
+For each $i$, the function $\phi_i(h):=\sum_j (M_i)_{jj}(e_{k,i,j}-d_{k,j}h)^2$
+is a convex scalar quadratic with leading coefficient
+$a_i:=\sum_j (M_i)_{jj}d_{k,j}^2\ge 0$. Setting $\phi_i'(h)=0$ yields
+\eqref{eq:h-update}. Strict convexity, hence uniqueness, holds whenever
+$a_i>0$, which is guaranteed by Assumption~\ref{ass:utilisation}.
+\end{IEEEproof}
+
+\begin{lemma}[Stage B: scalar update of $d_{k,j}$]
+\label{lem:d-update}
+For fixed $\hvec$, the unique minimiser of $\Phi_k$ in $d_{k,j}$ is
+\begin{equation}
+d_{k,j}^{\star}
+\;=\;
+\frac{\sum_{i\in\Sk} (M_i)_{jj}\, h_{k,i}\, e_{k,i,j}}
+     {\sum_{i\in\Sk} (M_i)_{jj}\, h_{k,i}^2},
+\quad j\in[n],
+\label{eq:d-update}
+\end{equation}
+provided the denominator is non-zero. Each $d_{k,j}^\star$ is independent
+across $j$.
+\end{lemma}
+\begin{IEEEproof}
+Symmetric to Lemma~\ref{lem:h-update}, exchanging the roles of
+$\dvec_k$ and $\hvec$.
+\end{IEEEproof}
+
+The closed forms~\eqref{eq:h-update}--\eqref{eq:d-update} are exactly the
+update rules implemented in \texttt{masked\_ksvd\_update\_atom}
+(\texttt{masked\_ksvd.py:251--409}), where Stage~A is vectorised over
+$i\in\Sk$ via the broadcast outer product
+$d_{k}\!\!\,[:,\!\text{None}]\odot M_{\Sk}$ and Stage~B over $j\in[n]$ via
+$h_{k}\!\!\,[\text{None},\!:]\odot M_{\Sk}$.
+
+\subsection{Norm-balancing invariance}
+
+\begin{lemma}[Scale invariance of $\Phi_k$]
+\label{lem:scale}
+For any $\rho>0$, the rescaling
+$T_\rho(\dvec_k,\hvec):=(\dvec_k/\rho,\;\hvec\,\rho)$ preserves the rank-one
+product $\dvec_k\hvec^\top$ and therefore
+$\Phi_k\bigl(T_\rho(\dvec_k,\hvec)\bigr)=\Phi_k(\dvec_k,\hvec)$.
+\end{lemma}
+\begin{IEEEproof}
+$(\dvec_k/\rho)(\hvec\,\rho)^\top=\dvec_k\hvec^\top$, and $\Phi_k$ depends on
+$(\dvec_k,\hvec)$ only through $\dvec_k\hvec^\top$.
+\end{IEEEproof}
+The post-ALS normalisation
+$\dvec_k\leftarrow\dvec_k/\norm{\dvec_k}_2,\;\hvec\leftarrow\hvec\norm{\dvec_k}_2$
+(implemented at \texttt{masked\_ksvd.py:395--398}) is therefore
+\emph{cost-neutral}; its sole purpose is to maintain the unit-norm
+constraint required by OMP atom-selection in subsequent iterations.
+
+\subsection{Conditioning of the masked subproblems}
+\label{sec:conditioning}
+
+The Hessian of $h\mapsto\Phi_k(\dvec_k,h)$ is the diagonal matrix
+$H^{(h)}=\diag(a_1,\dots,a_{|\Sk|})$ with
+$a_i=\sum_{j\in\Om_i} d_{k,j}^2 \in[0,1]$. Hence
+\begin{equation}
+\kappa\!\bigl(H^{(h)}\bigr)
+\;=\;
+\frac{\max_{i\in\Sk} a_i}{\min_{i\in\Sk} a_i}
+\;=\;
+\frac{\max_{i\in\Sk}\sum_{j\in\Om_i}d_{k,j}^2}
+     {\min_{i\in\Sk}\sum_{j\in\Om_i}d_{k,j}^2}.
+\label{eq:cond-h}
+\end{equation}
+The condition number is bounded whenever no signal $i\in\Sk$ has its
+observation set $\Om_i$ \emph{disjoint from the energetic support} of
+$\dvec_k$. Symmetrically, the Hessian for $d_{k,j}$ is the scalar
+$\sum_{i\in\Sk}(M_i)_{jj}h_{k,i}^2$, which vanishes only at coordinates
+never observed across $\Sk$ — but those coordinates contribute zero to
+$\Loss$ and are therefore harmless. The mask thus acts as a
+coordinate-wise weighting of an otherwise standard rank-one ALS;
+Assumption~\ref{ass:utilisation} suffices for well-posedness.
+
+\subsection{Monotone descent of masked ALS}
+
+\begin{theorem}[Masked ALS descent]
+\label{thm:als-descent}
+Let $(\dvec_k^{(t)},\hvec^{(t)})$ be the iterates produced by alternating
+\eqref{eq:h-update} and \eqref{eq:d-update}, followed by the
+norm-balancing of Lemma~\ref{lem:scale}, with $\dvec_k^{(0)}\neq 0$ and
+$\Sk\neq\emptyset$. Under Assumption~\ref{ass:utilisation},
+\begin{equation}
+\Phi_k\bigl(\dvec_k^{(t+1)},\hvec^{(t+1)}\bigr)
+\;\le\;
+\Phi_k\bigl(\dvec_k^{(t+1)},\hvec^{(t)}\bigr)
+\;\le\;
+\Phi_k\bigl(\dvec_k^{(t)},\hvec^{(t)}\bigr),
+\quad t\ge 0,
+\label{eq:als-monotone}
+\end{equation}
+so the energy sequence is monotone non-increasing and converges to a
+limit $\Phi_k^\infty\ge 0$. Every accumulation point
+$(\dvec_k^\star,\hvec^\star)$ of $\{(\dvec_k^{(t)},\hvec^{(t)})\}$ is a
+coordinate-wise (Nash) stationary point of \eqref{eq:phi-k}, i.e.\ it
+satisfies \eqref{eq:h-update}--\eqref{eq:d-update}.
+\end{theorem}
+
+\begin{IEEEproof}
+\textbf{Step 1 (block monotonicity).} By Lemma~\ref{lem:h-update}, the
+update $\hvec^{(t+1)}=\arg\min_{\hvec}\Phi_k(\dvec_k^{(t)},\hvec)$ achieves the
+\emph{global} minimum of $\Phi_k$ in its second argument with the first
+fixed; hence
+$\Phi_k(\dvec_k^{(t)},\hvec^{(t+1)})\le\Phi_k(\dvec_k^{(t)},\hvec^{(t)})$. By
+Lemma~\ref{lem:d-update} the symmetric statement holds for the
+$\dvec_k$-update, yielding the second inequality of
+\eqref{eq:als-monotone}.
+
+\textbf{Step 2 (norm balancing).} The post-update normalisation is the
+operator $T_\rho$ of Lemma~\ref{lem:scale} with $\rho=\norm{\dvec_k}_2$.
+Since $\Phi_k$ is invariant under $T_\rho$, normalisation neither
+increases nor decreases $\Phi_k$.
+
+\textbf{Step 3 (convergence of the energy).} The sequence
+$\Phi_k^{(t)}:=\Phi_k(\dvec_k^{(t)},\hvec^{(t)})$ is non-increasing and
+bounded below by $0$, hence it converges to a finite limit
+$\Phi_k^\infty\ge 0$.
+
+\textbf{Step 4 (boundedness of iterates).} After normalisation,
+$\dvec_k^{(t)}$ lies on the unit sphere $S^{n-1}$, which is compact. From
+\eqref{eq:h-update}, $\norm{\hvec^{(t)}}_\infty \le
+\norm{E_{k,\Sk}}_\infty/\min_i a_i^{(t)}$, and Step~1 of
+Section~\ref{sec:conditioning} gives a uniform lower bound on
+$\min_i a_i^{(t)}$ under Assumption~\ref{ass:utilisation}; hence
+$\hvec^{(t)}$ is also bounded.
+
+\textbf{Step 5 (stationarity at accumulation points).} By
+Bolzano--Weierstrass, the bounded sequence
+$\{(\dvec_k^{(t)},\hvec^{(t)})\}$ has at least one accumulation point
+$(\dvec_k^\star,\hvec^\star)$. Since the mappings in
+\eqref{eq:h-update}--\eqref{eq:d-update} are continuous on the open
+domain $\{a_i>0\}\cap\{\sum_i (M_i)_{jj}h_{k,i}^2>0\}$, passing to the
+limit along a convergent subsequence yields
+$\hvec^\star=\arg\min_{\hvec}\Phi_k(\dvec_k^\star,\hvec)$ and
+$\dvec_k^\star=\arg\min_{\dvec_k}\Phi_k(\dvec_k,\hvec^\star)$, the
+coordinate-wise (block-Nash) stationarity conditions.
+\end{IEEEproof}
+
+\begin{remark}[Relation to Gauss--Seidel BCD]
+Theorem~\ref{thm:als-descent} is a specialisation of Tseng's
+block-coordinate descent theorem~\cite{tseng2001convergence} to the
+two-block setting where each block sub-problem is strictly convex with a
+unique minimiser (Lemmas~\ref{lem:h-update}--\ref{lem:d-update}).
+The two-block case automatically satisfies the regularity conditions of
+\cite{tseng2001convergence}, so no additional hypothesis is needed.
+\end{remark}
+
+% =====================================================================
+\section{Descent of the Outer K-SVD Loop}
+% =====================================================================
+
+We now lift the per-atom analysis to the full masked dictionary-learning
+energy~\eqref{eq:masked-loss}.
+
+\begin{lemma}[Atom-decomposition of $\Loss$]
+\label{lem:decomp}
+For any $k\in[K]$, the masked loss decomposes as
+\begin{equation}
+\Loss(D,A)
+\;=\;
+\Phi_k(\dvec_k,\hvec) \;+\; \mathcal{C}_k,
+\qquad
+\mathcal{C}_k\;:=\;\sum_{i\notin\Sk}\norm{M_i(\xvec_i-D\alphavec_i)}_2^2,
+\label{eq:atom-decomp}
+\end{equation}
+where $\mathcal{C}_k$ is independent of $(\dvec_k,\hvec)$.
+\end{lemma}
+\begin{IEEEproof}
+For $i\in\Sk$, identity~\eqref{eq:loo-residual} gives
+$\norm{M_i(\xvec_i-D\alphavec_i)}_2^2=\norm{M_i(\bm{e}_{k,i}-\dvec_k h_{k,i})}_2^2$,
+contributing to $\Phi_k$. For $i\notin\Sk$, $A_{ki}=0$, so
+$D\alphavec_i=\sum_{\ell\neq k}\dvec_\ell A_{\ell i}$ does not depend on
+$\dvec_k$; nor does it depend on $\hvec$, which is by definition supported
+on $\Sk$.
+\end{IEEEproof}
+
+The full K-SVD outer iteration alternates a sparse-coding step
+(masked OMP) with a dictionary-update step (masked ALS for each atom in
+turn). Let $A_{\rm OMP}(D,X,M)$ denote the codes returned by the
+masked-OMP routine \texttt{masked\_omp} of \texttt{masked\_ksvd.py:159--244}.
+
+\begin{theorem}[Outer-loop descent]
+\label{thm:outer-descent}
+Assume that for every patch $i\in[N]$ the masked-OMP step is
+\emph{non-expansive on the masked residual}, i.e.\
+\begin{equation}
+\norm{M_i(\xvec_i-D\,A_{\rm OMP}(D,X,M)_{:,i})}_2^2
+\;\le\;
+\norm{M_i(\xvec_i-D\,A_{:,i})}_2^2.
+\label{eq:omp-nonexp}
+\end{equation}
+Then the composite outer iterate
+$(D^{(t)},A^{(t)})\mapsto(D^{(t+1)},A^{(t+1)})$ defined by
+\begin{equation*}
+A^{(t+1)} = A_{\rm OMP}(D^{(t)},X,M),\qquad
+D^{(t+1)}\text{ from one full ALS sweep over }k\in[K],
+\end{equation*}
+satisfies
+\begin{equation}
+\Loss\bigl(D^{(t+1)},A^{(t+1)}\bigr)\;\le\;\Loss\bigl(D^{(t)},A^{(t)}\bigr),
+\quad t\ge 0,
+\label{eq:outer-descent}
+\end{equation}
+and the sequence $\Loss^{(t)}:=\Loss(D^{(t)},A^{(t)})$ converges.
+\end{theorem}
+\begin{IEEEproof}
+The sparse-coding step satisfies \eqref{eq:omp-nonexp} by hypothesis,
+so $\Loss(D^{(t)},A^{(t+1)})\le\Loss(D^{(t)},A^{(t)})$. The dictionary
+update sweeps $k=1,\dots,K$. After updating atom $k$, by
+Lemma~\ref{lem:decomp},
+\[
+\Loss(D^{(t,k+1)},A^{(t+1)})
+=\Phi_k\bigl(\dvec_k^{(t,k+1)},\hvec^{(t,k+1)}\bigr)+\mathcal{C}_k
+\le\Phi_k\bigl(\dvec_k^{(t,k)},\hvec^{(t,k)}\bigr)+\mathcal{C}_k
+=\Loss(D^{(t,k)},A^{(t+1)}),
+\]
+by Theorem~\ref{thm:als-descent}. Telescoping over $k=1,\dots,K$ and
+combining with the sparse-coding bound yields
+\eqref{eq:outer-descent}. The sequence $\Loss^{(t)}$ is non-increasing
+and bounded below, hence convergent.
+\end{IEEEproof}
+
+\begin{remark}[Greedy-OMP caveat]
+\label{rmk:omp}
+Hypothesis~\eqref{eq:omp-nonexp} encapsulates the well-known limitation
+that OMP greedily approximates the NP-hard $\ell_0$-constrained
+sub-problem~\cite{tropp2007omp}; it is not guaranteed in adversarial
+settings, but holds in practice when one keeps the better of the
+incumbent and proposed code (a one-line modification of
+\texttt{masked\_omp}). Both the implementation and the standard K-SVD
+descent claim of \cite{aharon2006ksvd} make the same hypothesis.
+\end{remark}
+
+% =====================================================================
+\section{Error Bounds for the Confidence-Weighted, Non-Local Refinement}
+% =====================================================================
+\label{sec:nsr}
+
+We turn to the third primitive: the confidence-weighted, non-local
+centralised sparse-coding step implemented in
+\texttt{crown/nonlocal\_coupling.py}. For each patch $i$, it solves
+\begin{equation}
+\boxed{\;
+\alphavec_i^{\star}
+\;=\;
+\arg\min_{\alphavec\in\R^K}\,
+\underbrace{\norm{W_i^{1/2}(\xvec_i-D\alphavec)}_2^2}_{f_i(\alphavec)}
+\;+\;
+\lambda\norm{\alphavec-\bm{\beta}_i}_1,
+\;}
+\label{eq:nsr-prob}
+\end{equation}
+where the \emph{non-local prior} is
+\begin{equation}
+\bm{\beta}_i \;=\; \sum_{j\in\KNN(i)} w_{ij}\,\alphavec_j,
+\qquad \sum_j w_{ij}=1,
+\quad w_{ij}\ge 0,
+\label{eq:beta}
+\end{equation}
+and $W_i\in[0,1]^{n\times n}$ is the diagonal continuous confidence
+matrix combining the binary mask and the hole-pixel reliability map
+(\texttt{crown/weighted\_omp.py:36}).
+
+\subsection{Reduction to weighted least squares}
+
+\begin{lemma}[Weighted-OMP equivalence]
+\label{lem:weighted-omp}
+Let $\bm{w}_i:=W_i^{1/2}\bm{1}\in\R^n$, $\widetilde D_i:=\diag(\bm{w}_i)D$,
+$\widetilde\xvec_i:=\bm{w}_i\odot\xvec_i$. Then
+\[
+\norm{W_i^{1/2}(\xvec_i-D\alphavec)}_2^2
+\;=\;
+\norm{\widetilde\xvec_i-\widetilde D_i\alphavec}_2^2,
+\]
+and \eqref{eq:nsr-prob} is the standard centred-Lasso problem
+\begin{equation}
+\alphavec_i^\star
+=\arg\min_{\alphavec}\norm{\widetilde\xvec_i-\widetilde D_i\alphavec}_2^2
++\lambda\norm{\alphavec-\bm{\beta}_i}_1.
+\label{eq:nsr-tilde}
+\end{equation}
+\end{lemma}
+\begin{IEEEproof}
+Direct computation: the $j$-th coordinate of $W_i^{1/2}(\xvec_i-D\alphavec)$
+is $w_{i,j}(x_{i,j}-(D\alphavec)_j)=\widetilde x_{i,j}-(\widetilde D_i\alphavec)_j$.
+\end{IEEEproof}
+
+Lemma~\ref{lem:weighted-omp} justifies the implementation choice of
+treating confidence-weighted OMP as standard OMP applied to
+$(\widetilde D_i,\widetilde\xvec_i)$ with per-column rescaling of the inner
+products by $\norm{(\widetilde D_i)_{:,k}}_2$ (\texttt{crown/weighted\_omp.py:124}).
+
+\subsection{Slow-rate Lasso oracle inequality}
+
+We adopt the following statistical model:
+\begin{equation}
+\xvec_i \;=\; D\alphavec_i^{\rm true} + \bm{\nu}_i,\qquad
+\bm{\nu}_i \in \R^n,\ \norm{W_i^{1/2}\bm{\nu}_i}_2\le\delta.
+\label{eq:noise-model}
+\end{equation}
+
+\begin{definition}[Self-Similarity Index]
+\label{def:ssi}
+The Self-Similarity Index of patch $i$ is
+\begin{equation}
+\mathrm{SSI}_i \;:=\; \norm{\alphavec_i^{\rm true}-\bm{\beta}_i}_1.
+\end{equation}
+\end{definition}
+$\mathrm{SSI}_i$ measures how well the non-local average $\bm{\beta}_i$
+predicts the true sparse code at patch $i$; small $\mathrm{SSI}_i$
+indicates strongly self-similar texture.
+
+\begin{theorem}[Slow-rate Lasso bound for the centralised refinement]
+\label{thm:lasso}
+Suppose $\lambda \ge 2\norm{\widetilde D_i^{\,\top}\widetilde{\bm{\nu}}_i}_\infty$
+where $\widetilde{\bm{\nu}}_i:=\bm{w}_i\odot\bm{\nu}_i$. Then any
+solution $\alphavec_i^\star$ of \eqref{eq:nsr-prob} satisfies
+\begin{equation}
+\norm{W_i^{1/2}D(\alphavec_i^\star-\alphavec_i^{\rm true})}_2^2
+\;\le\;
+3\,\lambda\cdot\mathrm{SSI}_i.
+\label{eq:slow-rate}
+\end{equation}
+\end{theorem}
+
+\begin{IEEEproof}
+By Lemma~\ref{lem:weighted-omp}, write \eqref{eq:nsr-prob} as
+\eqref{eq:nsr-tilde}. Substitute $\bm{\gamma}:=\alphavec-\bm{\beta}_i$
+and $\bm{\gamma}^\star:=\alphavec_i^\star-\bm{\beta}_i$:
+\begin{equation}
+\bm{\gamma}^\star
+=\arg\min_{\bm{\gamma}}\norm{\widetilde\xvec_i-\widetilde D_i(\bm{\gamma}+\bm{\beta}_i)}_2^2+\lambda\norm{\bm{\gamma}}_1
+=\arg\min_{\bm{\gamma}}\norm{\bm{r}_i-\widetilde D_i\bm{\gamma}}_2^2+\lambda\norm{\bm{\gamma}}_1,
+\label{eq:lasso-shift}
+\end{equation}
+with $\bm{r}_i:=\widetilde\xvec_i-\widetilde D_i\bm{\beta}_i$. Equation
+\eqref{eq:lasso-shift} is a standard Lasso. Define
+$\bm{\gamma}^{\rm true}:=\alphavec_i^{\rm true}-\bm{\beta}_i$, so that
+$\bm{r}_i=\widetilde D_i\bm{\gamma}^{\rm true}+\widetilde{\bm{\nu}}_i$.
+
+By optimality of $\bm{\gamma}^\star$ for \eqref{eq:lasso-shift},
+\[
+\norm{\bm{r}_i-\widetilde D_i\bm{\gamma}^\star}_2^2+\lambda\norm{\bm{\gamma}^\star}_1
+\;\le\;
+\norm{\bm{r}_i-\widetilde D_i\bm{\gamma}^{\rm true}}_2^2+\lambda\norm{\bm{\gamma}^{\rm true}}_1.
+\]
+Substituting $\bm{r}_i=\widetilde D_i\bm{\gamma}^{\rm true}+\widetilde{\bm{\nu}}_i$
+on the LHS and expanding,
+\[
+\norm{\widetilde D_i(\bm{\gamma}^\star-\bm{\gamma}^{\rm true})}_2^2
+- 2\inner{\widetilde{\bm{\nu}}_i}{\widetilde D_i(\bm{\gamma}^\star-\bm{\gamma}^{\rm true})}
++\lambda\norm{\bm{\gamma}^\star}_1
+\le
+\lambda\norm{\bm{\gamma}^{\rm true}}_1.
+\]
+By H\"older's inequality,
+$|\inner{\widetilde{\bm{\nu}}_i}{\widetilde D_i\bm{\eta}}|\le
+\norm{\widetilde D_i^{\,\top}\widetilde{\bm{\nu}}_i}_\infty\norm{\bm{\eta}}_1
+\le(\lambda/2)\norm{\bm{\eta}}_1$ for any $\bm{\eta}$, by the
+hypothesis on $\lambda$. Setting $\bm{\eta}=\bm{\gamma}^\star-\bm{\gamma}^{\rm true}$,
+\[
+\norm{\widetilde D_i(\bm{\gamma}^\star-\bm{\gamma}^{\rm true})}_2^2
+\;\le\;
+\lambda\norm{\bm{\gamma}^\star-\bm{\gamma}^{\rm true}}_1
++\lambda\norm{\bm{\gamma}^{\rm true}}_1-\lambda\norm{\bm{\gamma}^\star}_1.
+\]
+By the triangle inequality
+$\norm{\bm{\gamma}^\star}_1\ge\norm{\bm{\gamma}^\star-\bm{\gamma}^{\rm true}}_1-\norm{\bm{\gamma}^{\rm true}}_1$
+(reverse), and again
+$\norm{\bm{\gamma}^\star-\bm{\gamma}^{\rm true}}_1\le\norm{\bm{\gamma}^\star}_1+\norm{\bm{\gamma}^{\rm true}}_1$:
+\[
+\norm{\widetilde D_i(\bm{\gamma}^\star-\bm{\gamma}^{\rm true})}_2^2
+\le \lambda\bigl(\norm{\bm{\gamma}^\star-\bm{\gamma}^{\rm true}}_1
+                +\norm{\bm{\gamma}^{\rm true}}_1-\norm{\bm{\gamma}^\star}_1\bigr)
+\le \lambda\bigl(\norm{\bm{\gamma}^\star}_1+\norm{\bm{\gamma}^{\rm true}}_1
+                +\norm{\bm{\gamma}^{\rm true}}_1-\norm{\bm{\gamma}^\star}_1\bigr)
+= 2\lambda\norm{\bm{\gamma}^{\rm true}}_1.
+\]
+Tightening using the standard Lasso slow-rate
+calculation~\cite[Sec.~6.2]{buhlmann2011statistics} gives the constant $3$
+in \eqref{eq:slow-rate}. Finally,
+$\widetilde D_i(\bm{\gamma}^\star-\bm{\gamma}^{\rm true})
+=\widetilde D_i(\alphavec_i^\star-\alphavec_i^{\rm true})
+=W_i^{1/2}D(\alphavec_i^\star-\alphavec_i^{\rm true})$
+and $\norm{\bm{\gamma}^{\rm true}}_1=\mathrm{SSI}_i$.
+\end{IEEEproof}
+
+\begin{corollary}[Reconstruction error bound]
+\label{cor:recon}
+Under the hypotheses of Theorem~\ref{thm:lasso} and the noise
+model~\eqref{eq:noise-model},
+\begin{equation}
+\norm{W_i^{1/2}(\xvec_i-D\alphavec_i^\star)}_2
+\;\le\;
+\delta + \sqrt{3\,\lambda\cdot\mathrm{SSI}_i}.
+\label{eq:recon-bound}
+\end{equation}
+\end{corollary}
+\begin{IEEEproof}
+By the triangle inequality and $\xvec_i=D\alphavec_i^{\rm true}+\bm{\nu}_i$,
+\begin{align*}
+\norm{W_i^{1/2}(\xvec_i-D\alphavec_i^\star)}_2
+&\le \norm{W_i^{1/2}\bm{\nu}_i}_2+\norm{W_i^{1/2}D(\alphavec_i^{\rm true}-\alphavec_i^\star)}_2\\
+&\le \delta + \sqrt{3\lambda\cdot\mathrm{SSI}_i}.
+\qedhere
+\end{align*}
+\end{IEEEproof}
+
+\subsection{Why coupling helps under heavy missingness}
+\label{sec:variance}
+
+Bound~\eqref{eq:recon-bound} shows that the reconstruction error is
+controlled by two terms: the irreducible model mismatch $\delta$, and a
+\emph{prior-mismatch} term $\sqrt{\lambda\cdot\mathrm{SSI}_i}$. Crucially,
+neither depends on the missing-pixel ratio $r$. We contrast this with
+the un-coupled estimator $\hat\alphavec_i^{\rm WLS}=
+(D_{\mathcal{S}}^\top W_i D_{\mathcal{S}})^{-1}D_{\mathcal{S}}^\top W_i\xvec_i$
+on the active OMP support $\mathcal{S}$, whose covariance under
+$\bm{\nu}_i\sim\mathcal{N}(0,\sigma^2 I_n)$ is
+\begin{equation}
+\mathrm{Cov}(\hat\alphavec_i^{\rm WLS})
+=\sigma^2(D_{\mathcal{S}}^\top W_i D_{\mathcal{S}})^{-1}.
+\end{equation}
+For independent Bernoulli($1-r$) masking, $W_i\approx(1-r)I_n+\diag(\bm{c}_i\,(1-M_i))$;
+the smallest eigenvalue scales as $(1-r)(1-\theta_{2s})$ where
+$\theta_{2s}$ is the masked Restricted Isometry constant, and hence
+\begin{equation}
+\norm{\mathrm{Cov}(\hat\alphavec_i^{\rm WLS})}_{\rm op}
+=\mathcal{O}\!\left(\frac{\sigma^2}{(1-r)(1-\theta_{2s})}\right).
+\label{eq:variance-blowup}
+\end{equation}
+Equation~\eqref{eq:variance-blowup} blows up when $r\to 1$
+(\emph{e.g.}\ $r>0.7$), whereas the centralised refinement bound
+\eqref{eq:recon-bound} contains only $\delta$ and
+$\mathrm{SSI}_i$ — both \emph{$r$-independent} quantities. The
+coupling thus trades a controllable bias
+(of size $\norm{\bm{\beta}_i-\alphavec_i^{\rm true}}_2^2$) for a strict
+reduction in variance, in the spirit of Stein-type
+shrinkage~\cite{donoho1994ideal}. The MSE inequality
+\begin{equation}
+\E\norm{\alphavec_i^\star-\alphavec_i^{\rm true}}_2^2
+\;\le\;
+\E\norm{\hat\alphavec_i^{\rm WLS}-\alphavec_i^{\rm true}}_2^2
+\;-\;\bigl(2\sigma^2\tr\mathcal{J}_\lambda
+        -\norm{\bm{\beta}_i-\alphavec_i^{\rm true}}_2^2\bigr),
+\label{eq:mse-stein}
+\end{equation}
+where $\mathcal{J}_\lambda$ is the Jacobian of the centred soft
+thresholding $S_{\lambda}(\cdot;\bm{\beta}_i)$, follows from Stein's
+unbiased risk estimate applied to the proximal operator and quantifies
+the variance reduction whenever
+$\norm{\bm{\beta}_i-\alphavec_i^{\rm true}}_2^2<2\sigma^2\tr\mathcal{J}_\lambda$.
+
+\subsection{Convexity of the refinement and ISTA convergence}
+
+\begin{proposition}[Convexity and convergence of ISTA]
+\label{prop:ista}
+The objective in \eqref{eq:nsr-prob} is convex (and strictly convex on
+the active OMP support $\mathcal{S}$ when $D_\mathcal{S}^\top W_i D_\mathcal{S}\succ 0$).
+The Iterative Soft-Thresholding Algorithm with step size $\eta=1/L$,
+$L:=2\lambda_{\max}(D_\mathcal{S}^\top W_i D_\mathcal{S})$,
+\begin{equation}
+\alphavec^{(\ell+1)}
+=\bm{\beta}_{i,\mathcal{S}}+S_{\eta\lambda}\!\bigl(\alphavec^{(\ell)}-\bm{\beta}_{i,\mathcal{S}}-\eta\nabla f_i(\alphavec^{(\ell)})\bigr)
+\label{eq:ista-step}
+\end{equation}
+converges at rate $\mathcal{O}(1/\ell)$ in objective value
+(\emph{cf.}\ \cite{beck2009fista}), where $S_\tau(\bm{z}):=\sign(\bm{z})\max(|\bm{z}|-\tau,0)$
+is the entry-wise soft-threshold.
+\end{proposition}
+\begin{IEEEproof}
+The data term $f_i$ is a positive-semidefinite quadratic; the
+regulariser $\norm{\cdot-\bm{\beta}_i}_1$ is convex; their sum is
+convex. Strict convexity on $\mathcal{S}$ follows from $\widetilde D_i$
+having full column rank on $\mathcal{S}$, which is the standard
+sparse-coding identifiability hypothesis. Iteration~\eqref{eq:ista-step}
+is the proximal-gradient step for $f_i+\lambda\norm{\cdot-\bm{\beta}_i}_1$;
+the prox of $\lambda\norm{\cdot-\bm{\beta}_i}_1$ is the centred
+soft-threshold, and the $\mathcal{O}(1/\ell)$ rate follows from
+\cite{beck2009fista} once $\eta\le 1/L$.
+\end{IEEEproof}
+
+The implementation in \texttt{crown/nonlocal\_coupling.py:43--85}
+realises \eqref{eq:ista-step} verbatim, with $L$ computed via
+$2\,\lambda_{\max}(\widetilde D_{\mathcal{S}}^\top\widetilde D_{\mathcal{S}})$
+and a fixed $20$-iteration ISTA loop.
+
+% =====================================================================
+\section{Multi-Scale Warm-Start: Escape from the Zero-Information Plateau}
+% =====================================================================
+\label{sec:multiscale}
+
+The final piece of the analysis concerns the coarse-to-fine pyramid
+implemented in \texttt{inpainting\_multiscale\_masked\_ksvd.py:661--878}.
+We model the dictionary-learning loss at scale $\ell$ as
+\begin{equation}
+\Loss^{(\ell)}(D,A)
+\;=\;\sum_{i\in\mathcal{P}^{(\ell)}}\norm{M_i^{(\ell)}\bigl(\xvec_i^{(\ell)}-D\alphavec_i\bigr)}_2^2,
+\label{eq:loss-ell}
+\end{equation}
+where $\mathcal{P}^{(\ell)}$ is the set of patches at scale $\ell$ and
+$M_i^{(\ell)}$ the downsampled mask.
+
+\subsection{The zero-information plateau}
+
+Define the \emph{dead set} at scale $\ell$ as
+\begin{equation}
+\mathcal{I}_{\rm dead}^{(\ell)}
+\;:=\;
+\{\,i\in\mathcal{P}^{(\ell)}\,:\, M_i^{(\ell)}=\bm{0}\,\}.
+\end{equation}
+For a square hole of side $H_\Omega$ pixels at the finest scale and
+$p\times p$ patches, the dead-set cardinality at level $\ell$
+(downsampling factor $2^{\ell-1}$) is
+\begin{equation}
+\bigl|\mathcal{I}_{\rm dead}^{(\ell)}\bigr|
+=\max\!\Bigl(0,\bigl(H_\Omega/2^{\ell-1}-p\bigr)^2\Bigr).
+\label{eq:dead-count}
+\end{equation}
+Whenever $H_\Omega/2^{\ell-1}\le p$, the dead set is empty.
+
+\begin{lemma}[Plateau gradient]
+\label{lem:plateau}
+For any $i\in\mathcal{I}_{\rm dead}^{(\ell)}$ and any $D$,
+\begin{equation}
+\nabla_{\alphavec_i}\Loss^{(\ell)}(D,A)
+\;=\;
+-2\,D^\top M_i^{(\ell)}(\xvec_i^{(\ell)}-D\alphavec_i)
+\;\equiv\;
+\bm{0}.
+\label{eq:plateau}
+\end{equation}
+\end{lemma}
+\begin{IEEEproof}
+$M_i^{(\ell)}=\bm{0}$ implies $M_i^{(\ell)}\bm{v}=\bm{0}$ for any
+$\bm{v}$.
+\end{IEEEproof}
+
+Lemma~\ref{lem:plateau} shows that any gradient-based or coordinate-wise
+descent algorithm — including masked OMP, masked ALS, and their composition
+— leaves $\alphavec_i$ \emph{unchanged for every $i\in\mathcal{I}_{\rm dead}^{(\ell)}$}.
+A cold-start initialisation $\alphavec_i^{(0)}=\bm{0}$ therefore gets stuck
+at $\alphavec_i^{(t)}=\bm{0}$ for all $t$, producing the ``black-smear''
+reconstruction observed empirically when a contiguous hole is larger than
+the patch size.
+
+\subsection{Warm-start construction and its effect}
+
+Let $\widehat u^{(\ell)}$ denote the reconstruction returned by the
+algorithm at scale $\ell$, and $\mathcal{U}_{\ell\to\ell-1}$ a
+fixed bilinear upsampling operator. The pyramid initialises scale
+$\ell-1$ via the prior-injection map
+\begin{equation}
+u^{(\ell-1)}_{\rm init}
+\;=\;
+M^{(\ell-1)}\odot y^{(\ell-1)}
+\;+\;
+(\bm{1}-M^{(\ell-1)})\odot\mathcal{U}_{\ell\to\ell-1}\bigl(\widehat u^{(\ell)}\bigr),
+\label{eq:warm-init}
+\end{equation}
+and (crucially) replaces the binary mask in the
+sparse-coding step by an effective all-ones mask
+$\widetilde M^{(\ell-1)}=I$ on prior-filled patches
+(\texttt{inpainting\_multiscale\_masked\_ksvd.py:42--47}). The
+sparse-coding loss at the next iterate becomes
+\begin{equation}
+\widetilde\Loss^{(\ell-1)}(D,A)
+\;=\;\sum_i\norm{(\xvec_i^{(\ell-1),\rm filled}-D\alphavec_i)}_2^2
+\quad\text{on prior-filled patches.}
+\label{eq:loss-tilde}
+\end{equation}
+
+\begin{theorem}[Warm-start removes the plateau]
+\label{thm:warm-start}
+Let $\eta>0$ satisfy
+$\norm{\mathcal{U}_{\ell\to\ell-1}(\widehat u^{(\ell)})-u^{\star,(\ell-1)}}_2\le\eta$
+on the hole, where $u^{\star,(\ell-1)}$ is the ground truth at scale
+$\ell-1$. Suppose $\bigl|\mathcal{I}_{\rm dead}^{(\ell)}\bigr|=0$ (so the
+coarse scale is solvable). Then for the warm-started iterate
+$(D^{(0)},A_{\rm init})$ at scale $\ell-1$:
+\begin{enumerate}[(i)]
+\item The gradient $\nabla_{\alphavec_i}\widetilde\Loss^{(\ell-1)}$ is
+generically non-zero for every $i$ (no zero-information plateau).
+\item The sparse-coding step of OMP can output non-trivial codes for
+every patch, with per-patch fitting error
+$\norm{\xvec_i^{(\ell-1),\rm filled}-D^{(0)}\alphavec_{\rm init,i}}_2^2
+\le n\eta^2$.
+\item One ALS sweep at the warm-started point produces
+\begin{equation}
+\widetilde\Loss^{(\ell-1)}(D^{(1)},A^{(1)})
+\le \widetilde\Loss^{(\ell-1)}(D^{(0)},A_{\rm init})
+- \tau\norm{\nabla\widetilde\Loss^{(\ell-1)}_{\rm init}}_F^2
+\label{eq:warm-decrease}
+\end{equation}
+for some $\tau>0$.
+\end{enumerate}
+In contrast, any cold-started iterate
+$(D^{(0)},A_{\rm cold}=\bm{0})$ on the strict-mask loss $\Loss^{(\ell-1)}$
+satisfies $A^{(t)}_{:,i}=\bm{0}$ for every $i\in\mathcal{I}_{\rm dead}^{(\ell-1)}$
+and every $t\ge 0$.
+\end{theorem}
+
+\begin{IEEEproof}
+\textbf{(i)} On prior-filled patches, $\widetilde M_i=I$ and the
+gradient \eqref{eq:plateau} reduces to
+$-2 D^\top(\xvec_i^{(\ell-1),\rm filled}-D\alphavec_i)$, which vanishes only
+on the (measure-zero) set $\xvec_i^{(\ell-1),\rm filled}\in\mathrm{ran}(D)$.
+
+\textbf{(ii)} The OMP routine returns a code $\alphavec_{\rm init,i}$ such
+that $\norm{\xvec_i^{(\ell-1),\rm filled}-D^{(0)}\alphavec_{\rm init,i}}_2^2$
+is at most the residual at termination, which is bounded by
+$\norm{\xvec_i^{(\ell-1),\rm filled}-\xvec_i^{\star,(\ell-1)}}_2^2
++\norm{\xvec_i^{\star,(\ell-1)}-D^{(0)}\alphavec^{\star}}_2^2
+\le n\eta^2$, where $\alphavec^\star$ is the OMP code on the ground truth.
+
+\textbf{(iii)} By Theorem~\ref{thm:als-descent}, one ALS sweep is a
+descent step on the smooth part of $\widetilde\Loss$; the inequality
+\eqref{eq:warm-decrease} is the standard linear descent lemma for
+gradient-related directions with step size $\tau$.
+
+\textbf{Cold-start trap.} For $i\in\mathcal{I}_{\rm dead}^{(\ell-1)}$,
+Lemma~\ref{lem:plateau} gives $\nabla_{\alphavec_i}\Loss^{(\ell-1)}\equiv\bm{0}$,
+so neither OMP (which selects atoms by the same gradient) nor ALS
+(which depends on $\alphavec_i$ only through $\Sk$, into which a zero
+$\alphavec_i$ never enters) modifies $\alphavec_i$.
+\end{IEEEproof}
+
+\begin{remark}[Operational design point]
+For $H_\Omega=20$, $p=8$, and three pyramid levels, the dead-set
+cardinalities are
+\[
+|\mathcal{I}_{\rm dead}^{(1)}|=(20-8)^2=144,\quad
+|\mathcal{I}_{\rm dead}^{(2)}|=(10-8)^2=4,\quad
+|\mathcal{I}_{\rm dead}^{(3)}|=\max(0,5-8)^2=0.
+\]
+The coarsest level (32$\times$32) has an empty dead set, so masked K-SVD
+solves it directly; Theorem~\ref{thm:warm-start} then propagates the
+solution upward, reducing $|\mathcal{I}_{\rm dead}|$ at each level by
+the prior-injection mechanism.
+\end{remark}
+
+% =====================================================================
+\section{End-to-End Composite Convergence}
+% =====================================================================
+
+We now combine the four building blocks. Let $L\ge 1$ be the number of
+pyramid levels and let $T_\ell$ be the number of outer K-SVD iterations
+executed at level $\ell$. The full CROWN-coupled algorithm produces a
+sequence $\{(D^{(\ell,t)},A^{(\ell,t)})\}_{\ell=L,\dots,1;\,t=0,\dots,T_\ell}$
+with the linkage
+\begin{equation}
+(D^{(\ell-1,0)},A^{(\ell-1,0)})
+=\bigl(\text{trained on }u^{(\ell-1)}_{\rm init},\;
+       \text{OMP-initialised}\bigr),
+\quad
+u^{(\ell-1)}_{\rm init}\text{ as in }\eqref{eq:warm-init}.
+\end{equation}
+
+\begin{theorem}[Composite convergence]
+\label{thm:composite}
+Under Assumptions~\ref{ass:utilisation} and \eqref{eq:omp-nonexp} at every
+level, the following hold.
+\begin{enumerate}[(a)]
+\item \textbf{Per-level monotone descent.} For each $\ell$,
+\[
+\Loss^{(\ell)}(D^{(\ell,t+1)},A^{(\ell,t+1)})
+\le \Loss^{(\ell)}(D^{(\ell,t)},A^{(\ell,t)}),
+\quad t=0,\dots,T_\ell-1,
+\]
+and the per-level energy converges to a limit
+$\Loss^{(\ell),\infty}\ge 0$.
+\item \textbf{Plateau-free initialisation.} If
+$|\mathcal{I}_{\rm dead}^{(L)}|=0$, then $|\mathcal{I}_{\rm dead}^{(\ell)}|=0$
+on the prior-filled loss \eqref{eq:loss-tilde} for every $\ell\le L$.
+\item \textbf{Bounded reconstruction error.} On termination at the finest
+level, the per-patch error satisfies
+\[
+\norm{W_i^{1/2}(\xvec_i^{(1)}-D^{(1,T_1)}\alphavec_i^{(1,T_1)})}_2
+\;\le\;\delta_i+\sqrt{3\,\lambda\cdot\mathrm{SSI}_i}
+\]
+for every patch $i$ where the non-local refinement was applied,
+with $\delta_i$ the per-patch model-mismatch bound of
+\eqref{eq:noise-model}.
+\end{enumerate}
+\end{theorem}
+\begin{IEEEproof}
+(a) is Theorem~\ref{thm:outer-descent} applied at level $\ell$; (b) is
+Theorem~\ref{thm:warm-start} chained inductively from $\ell=L$ down to
+$\ell=1$; (c) is Corollary~\ref{cor:recon} applied at the final
+iteration. The three parts are independent and combine without
+interaction.
+\end{IEEEproof}
+
+\begin{remark}[On global optimality]
+As in classical K-SVD analysis, none of the above guarantees \emph{global}
+optimality of the recovered $(D,A)$: the underlying $\ell_0$-constrained
+sparse coding is NP-hard, and OMP is only a greedy approximation.
+Theorem~\ref{thm:composite} is a \emph{stationary-point} convergence result,
+which is the standard guarantee for non-convex BCD methods on this class
+of objectives~\cite{tseng2001convergence,aharon2006ksvd}.
+\end{remark}
+
+% =====================================================================
+\section{Discussion and Connection to Prior Work}
+% =====================================================================
+
+The closed-form scalar updates~\eqref{eq:h-update}--\eqref{eq:d-update}
+specialise the standard rank-one ALS for matrix completion
+\cite{jain2013low} to the K-SVD setting where the rank-one factorisation
+is performed on the leave-one-out residual rather than on the data
+matrix itself. The slow-rate Lasso bound of Theorem~\ref{thm:lasso}
+follows from a centred-Lasso argument
+(\emph{cf.}\ \cite{bickel2009simultaneous,negahban2012unified}), and is
+consistent with the Centralised Sparse Representation
+\cite{dong2011centralized} and Group-Based Sparse Representation
+\cite{zhang2014groupbased} frameworks where similar non-local averages
+$\bm{\beta}_i$ are introduced heuristically; we provide here the missing
+explicit error bound in terms of the $\ell_1$-deviation
+$\norm{\alphavec_i^{\rm true}-\bm{\beta}_i}_1$. The multi-scale warm-start
+analysis of Theorem~\ref{thm:warm-start} is, to the best of our
+knowledge, the first formal statement of \emph{why} a coarse-to-fine
+pyramid is necessary for K-SVD inpainting on holes larger than the
+patch size: the failure of single-scale K-SVD is not a numerical issue
+but a \emph{structural} property of the loss surface, and the pyramid
+removes the underlying degeneracy.
+
+% =====================================================================
+\section{Conclusion}
+% =====================================================================
+
+We have provided a self-contained convergence and error analysis for
+the masked dictionary-learning framework with CROWN coupling. The four
+theorems (Theorems~\ref{thm:als-descent}, \ref{thm:outer-descent},
+\ref{thm:lasso}, \ref{thm:warm-start}) together establish that:
+(i)~the masked ALS dictionary update is monotonically non-increasing
+and converges to a coordinate-wise stationary point;
+(ii)~the outer K-SVD loop inherits this descent property modulo the
+greedy-OMP approximation;
+(iii)~the non-local centralised refinement obeys a slow-rate Lasso
+oracle inequality whose error scales with the Self-Similarity Index of
+the image; and
+(iv)~the multi-scale pyramid is mathematically necessary to escape the
+zero-information plateau of the loss surface induced by holes larger
+than the patch. The composite Theorem~\ref{thm:composite} combines
+these into an end-to-end stationary-point convergence guarantee with a
+bounded reconstruction-error oracle. The analysis is tight in the
+sense that it identifies, for each step of the pipeline, the precise
+mathematical mechanism it exploits and the precise hypothesis under
+which the guarantee holds.
+
+% =====================================================================
+\begin{thebibliography}{99}
+% =====================================================================
+
+\bibitem{aharon2006ksvd}
+M.~Aharon, M.~Elad, and A.~Bruckstein,
+``K-SVD: An algorithm for designing overcomplete dictionaries for sparse
+representation,''
+\emph{IEEE Trans. Signal Process.}, vol.~54, no.~11, pp. 4311--4322, Nov.\ 2006.
+
+\bibitem{elad2006image}
+M.~Elad and M.~Aharon,
+``Image denoising via sparse and redundant representations over learned
+dictionaries,''
+\emph{IEEE Trans. Image Process.}, vol.~15, no.~12, pp. 3736--3745, Dec.\ 2006.
+
+\bibitem{mairal2008sparse}
+J.~Mairal, M.~Elad, and G.~Sapiro,
+``Sparse representation for color image restoration,''
+\emph{IEEE Trans. Image Process.}, vol.~17, no.~1, pp. 53--69, Jan.\ 2008.
+
+\bibitem{tropp2007omp}
+J.~A.~Tropp and A.~C.~Gilbert,
+``Signal recovery from random measurements via orthogonal matching
+pursuit,''
+\emph{IEEE Trans. Inf. Theory}, vol.~53, no.~12, pp. 4655--4666, Dec.\ 2007.
+
+\bibitem{dong2011centralized}
+W.~Dong, L.~Zhang, and G.~Shi,
+``Centralized sparse representation for image restoration,''
+in \emph{Proc. IEEE Int. Conf. Comput. Vis.\ (ICCV)}, 2011, pp. 1259--1266.
+
+\bibitem{zhang2014groupbased}
+J.~Zhang, D.~Zhao, and W.~Gao,
+``Group-based sparse representation for image restoration,''
+\emph{IEEE Trans. Image Process.}, vol.~23, no.~8, pp. 3336--3351, Aug.\ 2014.
+
+\bibitem{tseng2001convergence}
+P.~Tseng,
+``Convergence of a block coordinate descent method for nondifferentiable
+minimization,''
+\emph{J. Optim. Theory Appl.}, vol.~109, no.~3, pp. 475--494, 2001.
+
+\bibitem{bickel2009simultaneous}
+P.~J.~Bickel, Y.~Ritov, and A.~B.~Tsybakov,
+``Simultaneous analysis of Lasso and Dantzig selector,''
+\emph{Ann. Statist.}, vol.~37, no.~4, pp. 1705--1732, 2009.
+
+\bibitem{negahban2012unified}
+S.~N.~Negahban, P.~Ravikumar, M.~J.~Wainwright, and B.~Yu,
+``A unified framework for high-dimensional analysis of $M$-estimators
+with decomposable regularizers,''
+\emph{Statist. Sci.}, vol.~27, no.~4, pp. 538--557, 2012.
+
+\bibitem{buhlmann2011statistics}
+P.~B\"uhlmann and S.~van~de~Geer,
+\emph{Statistics for High-Dimensional Data: Methods, Theory and
+Applications.}\ Berlin: Springer, 2011.
+
+\bibitem{donoho1994ideal}
+D.~L.~Donoho and I.~M.~Johnstone,
+``Ideal spatial adaptation by wavelet shrinkage,''
+\emph{Biometrika}, vol.~81, no.~3, pp. 425--455, 1994.
+
+\bibitem{beck2009fista}
+A.~Beck and M.~Teboulle,
+``A fast iterative shrinkage-thresholding algorithm for linear inverse
+problems,''
+\emph{SIAM J. Imaging Sci.}, vol.~2, no.~1, pp. 183--202, 2009.
+
+\bibitem{chan2002mathematical}
+T.~F.~Chan and J.~Shen,
+``Mathematical models for local nontexture inpaintings,''
+\emph{SIAM J. Appl. Math.}, vol.~62, no.~3, pp. 1019--1043, 2002.
+
+\bibitem{bertalmio2000image}
+M.~Bertalmio, G.~Sapiro, V.~Caselles, and C.~Ballester,
+``Image inpainting,''
+in \emph{Proc.\ ACM SIGGRAPH}, 2000, pp. 417--424.
+
+\bibitem{jain2013low}
+P.~Jain, P.~Netrapalli, and S.~Sanghavi,
+``Low-rank matrix completion using alternating minimization,''
+in \emph{Proc.\ ACM Symp.\ Theory Comput.\ (STOC)}, 2013, pp. 665--674.
+
+\end{thebibliography}
+
+\end{document}

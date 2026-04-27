@@ -1,9 +1,10 @@
 {
+  "aggregate_csv": "outputs/paper_meaningful_comparisons_parallel/aggregate.csv",
   "args": {
     "K_values": "192,256",
     "crown_T": "3,5",
     "dict_iters": "20",
-    "dry_run": true,
+    "dry_run": false,
     "images": "all",
     "jobs": 6,
     "masks": "random_p10,random_p30,square_s24,scratches_n4_t8",
@@ -18,8 +19,9 @@
     "seeds": "42,123",
     "sparsity": "6,8",
     "verbose": false,
-    "worker_threads": 1
+    "worker_threads": 4
   },
+  "completed_before_run": 0,
   "config": {
     "K": [
       192,
@@ -69,17 +71,24 @@
       8
     ]
   },
-  "created_at": "2026-04-26T15:39:46+00:00",
-  "dry_run": true,
-  "listed_specs": 2224,
+  "created_at": "2026-04-26T15:42:19+00:00",
+  "dry_run": false,
+  "failed_this_invocation": 0,
+  "finished_at": "2026-04-26T20:49:30+00:00",
   "parallel": {
     "jobs": 6,
     "queue_factor": 2,
-    "worker_threads": 1
+    "worker_threads": 4
   },
   "parallel_script_version": "1.0",
+  "pending_before_cap": 2224,
+  "pending_executed": 2224,
   "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "plots_dir": "outputs/paper_meaningful_comparisons_parallel/plots",
   "python": "3.13.5 (main, Jun 11 2025, 15:36:57) [Clang 17.0.0 (clang-1700.0.13.3)]",
+  "resume": false,
+  "runs_csv": "outputs/paper_meaningful_comparisons_parallel/runs.csv",
   "script_version": "1.0",
+  "succeeded_this_invocation": 2224,
   "total_specs": 2224
 }
