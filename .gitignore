@@ -1,3 +1,5 @@
 sweep/
 outputs/
 outputs/*
+.claude
+.claude/*
