@@ -1,0 +1,99 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Experimental setup}{1}{section.1}\protected@file@percent }
+\newlabel{sec:setup}{{1}{1}{Experimental setup}{section.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{Sweep manifest.}{1}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Effective hole sizes.}{1}{section*.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Average actual missing-pixel fraction per mask family, computed over all $1{,}112$ aggregate rows. \texttt  {square\_s24} removes the smallest \emph  {number} of pixels but is the most \emph  {spatially structured} hole, which the per-mask results below will show is the harder regime.\relax }}{2}{table.caption.3}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:masks}{{1}{2}{Average actual missing-pixel fraction per mask family, computed over all $1{,}112$ aggregate rows. \texttt {square\_s24} removes the smallest \emph {number} of pixels but is the most \emph {spatially structured} hole, which the per-mask results below will show is the harder regime.\relax }{table.caption.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Datasets and metrics.}{2}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Two output files.}{2}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Headline results}{2}{section.2}\protected@file@percent }
+\newlabel{sec:headline}{{2}{2}{Headline results}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Per-method ranking}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Mean metrics per method, averaged across all configurations. The hole-PSNR column is the primary ranking criterion. \texttt  {biharmonic} has fewer configurations because it does not depend on $K$, $s$, or $T$.\relax }}{2}{table.caption.6}\protected@file@percent }
+\newlabel{tab:headline}{{2}{2}{Mean metrics per method, averaged across all configurations. The hole-PSNR column is the primary ranking criterion. \method {biharmonic} has fewer configurations because it does not depend on $K$, $s$, or $T$.\relax }{table.caption.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}What this ranking does \emph  {not} show}{2}{subsection.2.2}\protected@file@percent }
+\newlabel{fig:method-summary}{{1a}{3}{Per-method mean hole-PSNR.\relax }{figure.caption.7}{}}
+\newlabel{sub@fig:method-summary}{{a}{3}{Per-method mean hole-PSNR.\relax }{figure.caption.7}{}}
+\newlabel{fig:mask-summary}{{1b}{3}{Per-mask mean hole-PSNR.\relax }{figure.caption.7}{}}
+\newlabel{sub@fig:mask-summary}{{b}{3}{Per-mask mean hole-PSNR.\relax }{figure.caption.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Aggregate quality summaries.\relax }}{3}{figure.caption.7}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Distribution of hole-PSNR by method, broken out by mask family. Boxes show the inter-quartile range over all $(K,s,T,\text  {image})$ configurations; whiskers extend to $1.5\cdot \mathrm  {IQR}$ and outliers are hidden. The diffusion-based \texttt  {biharmonic} and CROWN methods cluster tightly together; the K-SVD baselines are noticeably wider, especially on \texttt  {scratches} and \texttt  {square}.\relax }}{3}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:boxplot-mask}{{2}{3}{Distribution of hole-PSNR by method, broken out by mask family. Boxes show the inter-quartile range over all $(K,s,T,\text {image})$ configurations; whiskers extend to $1.5\cdot \mathrm {IQR}$ and outliers are hidden. The diffusion-based \method {biharmonic} and CROWN methods cluster tightly together; the K-SVD baselines are noticeably wider, especially on \texttt {scratches} and \texttt {square}.\relax }{figure.caption.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Per-mask and per-image structure}{3}{section.3}\protected@file@percent }
+\newlabel{sec:breakdown}{{3}{3}{Per-mask and per-image structure}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Method $\times $ mask}{3}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Observation 1: random masks are easy.}{3}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Observation 2: structured holes hurt KSVD a lot more.}{3}{section*.12}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Mean hole-PSNR (dB) by method and mask family. Bold cells mark the two best entries within each column.\relax }}{4}{table.caption.9}\protected@file@percent }
+\newlabel{tab:method-x-mask}{{3}{4}{Mean hole-PSNR (dB) by method and mask family. Bold cells mark the two best entries within each column.\relax }{table.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Method $\times $ image}{4}{subsection.3.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Mean hole-PSNR (dB) by method and image. \texttt  {moon} has large smooth regions and is therefore $\sim 10\,\textrm  {dB}$ easier than the other three; \texttt  {camera} and \texttt  {coins} are the hardest.\relax }}{4}{table.caption.13}\protected@file@percent }
+\newlabel{tab:method-x-image}{{4}{4}{Mean hole-PSNR (dB) by method and image. \texttt {moon} has large smooth regions and is therefore $\sim 10\dB $ easier than the other three; \texttt {camera} and \texttt {coins} are the hardest.\relax }{table.caption.13}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Paired ablation analysis}{4}{section.4}\protected@file@percent }
+\newlabel{sec:ablation}{{4}{4}{Paired ablation analysis}{section.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Paired deltas relative to \texttt  {crown\_full}, matched on image, mask, and hyperparameters. Sorted by $\Delta $ hole-PSNR.\relax }}{4}{table.caption.16}\protected@file@percent }
+\newlabel{tab:paired}{{5}{4}{Paired deltas relative to \method {crown\_full}, matched on image, mask, and hyperparameters. Sorted by $\Delta $ hole-PSNR.\relax }{table.caption.16}{}}
+\@writefile{toc}{\contentsline {paragraph}{Reading the deltas.}{4}{section*.17}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Heatmap of mean hole-PSNR across all configurations, sliced by method$\times $mask. Two clusters emerge: the \texttt  {biharmonic} / \texttt  {crown}-family band and the \texttt  {ksvd}-family band, with \texttt  {zero\_ksvd} an order of magnitude worse than everything else.\relax }}{5}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:heatmap-mask}{{3}{5}{Heatmap of mean hole-PSNR across all configurations, sliced by method$\times $mask. Two clusters emerge: the \method {biharmonic} / \method {crown}-family band and the \method {ksvd}-family band, with \method {zero\_ksvd} an order of magnitude worse than everything else.\relax }{figure.caption.10}{}}
+\@writefile{toc}{\contentsline {paragraph}{Per-mask paired deltas.}{5}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\texttt  {crown\_full} vs.\ \texttt  {biharmonic}, per mask.}{5}{section*.20}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Heatmap of method$\times $image mean hole-PSNR. The big diagonal-like pattern is content difficulty, not algorithmic behaviour: \texttt  {moon} is bright everywhere because every method benefits from its smoothness, while \texttt  {coins} and \texttt  {camera} are uniformly harder.\relax }}{6}{figure.caption.14}\protected@file@percent }
+\newlabel{fig:heatmap-image}{{4}{6}{Heatmap of method$\times $image mean hole-PSNR. The big diagonal-like pattern is content difficulty, not algorithmic behaviour: \texttt {moon} is bright everywhere because every method benefits from its smoothness, while \texttt {coins} and \texttt {camera} are uniformly harder.\relax }{figure.caption.14}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Hyperparameter sensitivity}{6}{section.5}\protected@file@percent }
+\newlabel{sec:sensitivity}{{5}{6}{Hyperparameter sensitivity}{section.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Hole-PSNR sensitivity of \texttt  {crown\_full} to $(K,s,T)$. The full range is $\approx 0.40\,\textrm  {dB}$.\relax }}{6}{table.caption.21}\protected@file@percent }
+\newlabel{tab:sensitivity}{{6}{6}{Hole-PSNR sensitivity of \method {crown\_full} to $(K,s,T)$. The full range is $\approx 0.40\dB $.\relax }{table.caption.21}{}}
+\@writefile{toc}{\contentsline {paragraph}{Take-aways.}{6}{section*.23}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Paired hole-PSNR delta vs.\ \texttt  {crown\_full}, matched on image, mask, and all hyperparameters. Negative values mean the ablation is worse than \texttt  {crown\_full}.\relax }}{7}{figure.caption.15}\protected@file@percent }
+\newlabel{fig:paired}{{5}{7}{Paired hole-PSNR delta vs.\ \method {crown\_full}, matched on image, mask, and all hyperparameters. Negative values mean the ablation is worse than \method {crown\_full}.\relax }{figure.caption.15}{}}
+\@writefile{toc}{\contentsline {paragraph}{Best- and worst-case configs.}{7}{section*.24}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Quality vs.\ runtime}{7}{section.6}\protected@file@percent }
+\newlabel{sec:tradeoff}{{6}{7}{Quality vs.\ runtime}{section.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Per-method runtime (seconds) statistics over all configurations. The non-local search dominates the runtime of \texttt  {crown\_full}; removing it ($\to $ \texttt  {crown\_no\_nonlocal}) cuts runtime by exactly the $\sim 70\,\text  {s}$ saved-time figure in Table\nobreakspace  {}\ref  {tab:paired}.\relax }}{7}{table.caption.26}\protected@file@percent }
+\newlabel{tab:runtime}{{7}{7}{Per-method runtime (seconds) statistics over all configurations. The non-local search dominates the runtime of \method {crown\_full}; removing it ($\to $ \method {crown\_no\_nonlocal}) cuts runtime by exactly the $\sim 70\,\text {s}$ saved-time figure in Table~\ref {tab:paired}.\relax }{table.caption.26}{}}
+\@writefile{toc}{\contentsline {paragraph}{Operating-point recommendation.}{7}{section*.27}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Paired ablation deltas (vs.\ \texttt  {crown\_full}) per mask family. The non-local term is essential on random masks but near-irrelevant on contiguous squares.\relax }}{8}{figure.caption.19}\protected@file@percent }
+\newlabel{fig:per-mask-ablation}{{6}{8}{Paired ablation deltas (vs.\ \method {crown\_full}) per mask family. The non-local term is essential on random masks but near-irrelevant on contiguous squares.\relax }{figure.caption.19}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Visual comparison}{8}{section.7}\protected@file@percent }
+\newlabel{sec:visual}{{7}{8}{Visual comparison}{section.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Reproducibility}{8}{section.8}\protected@file@percent }
+\newlabel{sec:reproducibility}{{8}{8}{Reproducibility}{section.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Failure-mode analysis}{8}{section.9}\protected@file@percent }
+\newlabel{sec:failures}{{9}{8}{Failure-mode analysis}{section.9}{}}
+\@writefile{toc}{\contentsline {paragraph}{The \texttt  {zero\_ksvd} collapse.}{8}{section*.30}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Hyperparameter sensitivity of \texttt  {crown\_full}, generated by the sweep script.\relax }}{9}{figure.caption.22}\protected@file@percent }
+\newlabel{fig:sensitivity}{{7}{9}{Hyperparameter sensitivity of \method {crown\_full}, generated by the sweep script.\relax }{figure.caption.22}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Across-seed reproducibility, computed as the mean of the \texttt  {hole\_psnr\_std} column in \texttt  {aggregate.csv} for each method. \texttt  {zero\_ksvd}'s extreme stability is a degenerate result -- it is reproducibly bad.\relax }}{9}{table.caption.29}\protected@file@percent }
+\newlabel{tab:reproducibility}{{8}{9}{Across-seed reproducibility, computed as the mean of the \texttt {hole\_psnr\_std} column in \texttt {aggregate.csv} for each method. \method {zero\_ksvd}'s extreme stability is a degenerate result -- it is reproducibly bad.\relax }{table.caption.29}{}}
+\@writefile{toc}{\contentsline {paragraph}{Squares break local-only K-SVD.}{9}{section*.31}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Saturating $T$.}{9}{section*.32}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusions}{9}{section.10}\protected@file@percent }
+\newlabel{sec:conclusions}{{10}{9}{Conclusions}{section.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Per-method quality--runtime scatter. Each marker is the method's mean hole-PSNR plotted against its mean runtime in seconds (note the log scale). The Pareto frontier is \texttt  {biharmonic} $\to $ \texttt  {crown\_no\_nonlocal} $\to $ \texttt  {crown\_full}; \texttt  {crown\_sparse\_only} is dominated by \texttt  {crown\_full} (same time, lower PSNR), and the K-SVD baselines are dominated by \texttt  {biharmonic}.\relax }}{10}{figure.caption.25}\protected@file@percent }
+\newlabel{fig:quality-runtime}{{8}{10}{Per-method quality--runtime scatter. Each marker is the method's mean hole-PSNR plotted against its mean runtime in seconds (note the log scale). The Pareto frontier is \method {biharmonic} $\to $ \method {crown\_no\_nonlocal} $\to $ \method {crown\_full}; \method {crown\_sparse\_only} is dominated by \method {crown\_full} (same time, lower PSNR), and the K-SVD baselines are dominated by \method {biharmonic}.\relax }{figure.caption.25}{}}
+\@writefile{toc}{\contentsline {paragraph}{What the second run will tell us.}{10}{section*.33}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Files used by this report}{10}{appendix.A}\protected@file@percent }
+\newlabel{app:files}{{A}{10}{Files used by this report}{appendix.A}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Selected qualitative comparison generated by the sweep script. Rows are images, columns are methods; under each crop the hole-PSNR is annotated.\relax }}{11}{figure.caption.28}\protected@file@percent }
+\newlabel{fig:visual}{{9}{11}{Selected qualitative comparison generated by the sweep script. Rows are images, columns are methods; under each crop the hole-PSNR is annotated.\relax }{figure.caption.28}{}}
+\gdef \@abspage@last{11}
