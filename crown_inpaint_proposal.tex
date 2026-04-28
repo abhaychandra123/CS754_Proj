@@ -1,0 +1,856 @@
+% =====================================================================
+%  CROWN-Inpaint: Updated Project Proposal
+%  ---------------------------------------------------------------------
+%  CS 754 Course Project, Spring 2026, IIT Bombay
+%  Compiles standalone with `pdflatex` (uses only standard packages).
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,bm,mathtools}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage{cite}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black!70!blue,
+  citecolor=black!50!green,
+  urlcolor=black!70!blue,
+}
+
+% --------- Theorem environments ---------
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\theoremstyle{remark}
+\newtheorem*{remark}{Remark}
+
+% --------- Macros ---------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Loss}{\mathcal{L}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\KNN}{\operatorname{KNN}}
+\newcommand{\sign}{\operatorname{sign}}
+\newcommand{\dvec}{\bm{d}}
+\newcommand{\hvec}{\bm{h}}
+\newcommand{\xvec}{\bm{x}}
+\newcommand{\alphavec}{\bm{\alpha}}
+\newcommand{\Sk}{\mathcal{S}_k}
+
+% --------- Title block ---------
+\title{\textbf{CROWN-Inpaint}: A Confidence-weighted, Regime-aware, \\
+       Non-local, Multi-scale Iterative Framework for Image Inpainting \\
+       \vspace{0.3em}
+       \large -- Updated Project Proposal --}
+
+\author{%
+  CS 754 Project Group \\
+  \textit{Department of Electrical Engineering, IIT Bombay} \\
+  \texttt{\{23b0313, …\}@iitb.ac.in}}
+
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+We propose \textbf{CROWN-Inpaint}, a unified iterative framework for
+single-image inpainting that integrates four complementary priors --
+\emph{Confidence}, \emph{Regime}, \emph{Non-local}, and multi-scale
+\emph{Warm-start} -- into a single optimisation-first solver layered on
+top of an established masked dictionary-learning backbone. After a
+careful audit of prior art (in particular Mairal--Elad--Sapiro 2008,
+Naumova--Schnass 2018, and the recent Innsbruck Bachelor thesis of
+Tiefenthaler 2018, which our group identified during literature
+review), we explicitly position \emph{masked K-SVD} as a settled
+baseline rather than a contribution, and re-centre our novelty on the
+\textbf{coupling layer} above it. Our four novel mechanisms are: (i) a
+continuous, time-varying confidence map that drives a weighted OMP
+generalising the binary masked OMP of prior work; (ii) a per-pixel
+regime map that fuses a biharmonic smooth-prior branch with the sparse
+branch; (iii) a non-local centralised $\ell_1$ coefficient-coupling
+step adapted from CSR/GSR but \emph{embedded inside} the iterative
+masked solver, with a slow-rate Lasso oracle inequality bounding its
+error by a Self-Similarity Index; and (iv) a coarse-to-fine pyramid
+with prior injection that provably removes the
+\emph{zero-information plateau} on which single-scale K-SVD gets stuck
+when the hole exceeds the patch size. We provide a self-contained
+convergence and error analysis, an ablation-rich experimental plan,
+and a clear delineation of which components are baselines and which
+are our actual contribution.
+\end{abstract}
+
+% =====================================================================
+\section{Problem Statement}
+% =====================================================================
+
+Let $y\in\R^{H\times W}$ be a single-channel image observed through a
+binary mask $M\in\{0,1\}^{H\times W}$, with $M_i=1$ iff pixel $i$ is
+observed and $M_i=0$ iff pixel $i$ is missing. The observed set is
+$\Omega=\{i:M_i=1\}$ and the hole is $\Omega^c$. We seek a
+reconstruction $u\in\R^{H\times W}$ such that
+\begin{enumerate}[label=(\roman*),itemsep=2pt]
+\item $u_i = y_i$ for all $i\in\Omega$ (\emph{exact preservation of
+  observed data}); and
+\item $u$ on $\Omega^c$ is statistically and visually consistent with
+  the observed surround.
+\end{enumerate}
+Within the dictionary-based paradigm, every $p\times p$ patch
+$R_q u\in\R^n$ ($n=p^2$) is modelled as
+\begin{equation}
+R_q u \;\approx\; D \alphavec_q,\qquad \norm{\alphavec_q}_0\le s,
+\label{eq:patch-model}
+\end{equation}
+for a learned dictionary $D\in\R^{n\times K}$ ($K\gtrsim n$,
+unit-norm columns) and a sparse code
+$\alphavec_q\in\R^K$ with at most $s$ non-zeros. Because the mask
+forbids access to ground-truth patches, the dictionary itself must be
+learned from incomplete observations, by approximately solving
+\begin{equation}
+\min_{D,\,A}\;
+\sum_{q} \norm{M_q\,(R_q y - D\alphavec_q)}_2^2
+\quad\text{s.t.}\;\norm{\alphavec_q}_0\le s,\;\norm{D_{:,k}}_2=1,
+\label{eq:masked-loss}
+\end{equation}
+where $M_q\in\{0,1\}^{n\times n}$ is the diagonal restriction of $M$
+to the patch at position $q$. Equation~\eqref{eq:masked-loss} is the
+established \emph{weighted K-SVD objective}, due to
+Mairal--Elad--Sapiro~\cite{mairal2008sparse} and refined in
+Naumova--Schnass~\cite{naumova2018itkrmm} and
+Tiefenthaler~\cite{tiefenthaler2018thesis}; it is \emph{not} our
+contribution.
+
+The remainder of this proposal addresses the practical and theoretical
+\emph{gap} between existing solvers of \eqref{eq:masked-loss} and what
+is required for high-fidelity inpainting under (a) heavy missingness
+($r>70\%$), (b) holes that are larger than a patch, and (c) mixed
+smooth/textured content -- regimes where every existing single-scale,
+binary-masked, non-coupled solver in the literature is observably
+suboptimal.
+
+% =====================================================================
+\section{Related Work and the State of the Art}
+% =====================================================================
+\label{sec:related}
+
+\subsection{Masked dictionary inpainting (the baseline)}
+
+The objective \eqref{eq:masked-loss} originates with
+Mairal--Elad--Sapiro~\cite{mairal2008sparse} (\emph{weighted K-SVD},
+``wKSVD''), where the dictionary update is performed by a weighted
+rank-one approximation of the masked error matrix. Convergence of the
+weighted rank-one step is established by
+Srebro--Jaakkola~\cite{srebro2003weighted} via an EM/imputation argument.
+
+The \emph{ITKrMM} algorithm of Naumova--Schnass~\cite{naumova2018itkrmm}
+extends this line by replacing OMP with thresholding and the SVD with
+$K$ residual means, and additionally learns an \emph{$L$-dimensional
+low-rank component} $\Gamma$ that captures the dense ``mean +
+contrast'' part of natural-image statistics.
+
+Most recently, Tiefenthaler~\cite{tiefenthaler2018thesis} (Innsbruck,
+2018, supervisor K.~Schnass) explicitly extends wKSVD to allow
+arbitrary-dimensional low-rank components (algorithm \emph{wKSVDL}),
+and benchmarks wKSVDL against ITKrMM on Peppers and Mandrill at
+$30\%/50\%/70\%$ random erasure plus a structured \emph{Cracks} mask.
+The thesis settles, in the Schnass group's own line of work, the
+\emph{single-scale}, binary-mask, single-pass dictionary inpainting
+question.
+
+\textbf{What this prior art establishes (and our project does not
+claim as novel).}\quad
+The following are settled and we use them as baselines:
+\begin{enumerate}[label=(B\arabic*),leftmargin=2.5em,itemsep=2pt]
+\item \emph{Masked OMP} for sparse coding of partially observed
+  patches (\cite{mairal2008sparse}, also Alg.~1
+  of~\cite{tiefenthaler2018thesis}).
+\item \emph{Weighted rank-one dictionary update} solving
+  \eqref{eq:masked-loss}'s atom-wise sub-problem
+  (\cite{srebro2003weighted,mairal2008sparse,tiefenthaler2018thesis}).
+\item \emph{Single-pass dictionary inpainting} -- learn $D$ once,
+  sparse-code masked patches, overlap-average to a final image.
+\item \emph{Low-rank component handling} (ITKrMM and wKSVDL).
+\end{enumerate}
+
+\subsection{Smooth-prior inpainting}
+
+Variational and PDE-based methods (Chan--Shen
+\cite{chan2002mathematical}, Bertalmio--Sapiro
+\cite{bertalmio2000image}) provably dominate dictionary-based methods
+on smooth holes: biharmonic completion is the unique minimiser of
+bending energy with Dirichlet/Neumann boundary conditions, hence
+essentially optimal in the texture-free regime. Conversely, these
+methods smear textures.
+
+\subsection{Non-local sparse representations}
+
+Centralised Sparse Representation (CSR,
+Dong--Zhang--Shi~\cite{dong2011centralized}) and Group-Based Sparse
+Representation (GSR,
+Zhang--Zhao--Gao~\cite{zhang2014groupbased}) showed that regularising
+each patch's sparse code toward the weighted mean of its similar
+patches' codes improves stability on \emph{fully observed}
+restoration. To our knowledge, no prior work integrates this kind of
+non-local coefficient coupling into a \emph{masked, iterative}
+dictionary-inpainting solver with provable error control. CROWN-Inpaint
+does.
+
+\subsection{Multi-scale image processing}
+
+Image pyramids and coarse-to-fine optimisation are classical, but their
+specific role in escaping the \emph{zero-information plateau} of
+masked K-SVD when the hole exceeds the patch has not, to our
+knowledge, been formally analysed in the dictionary-inpainting
+literature.
+
+% =====================================================================
+\section{The Gap We Exploit}
+% =====================================================================
+\label{sec:gap}
+
+The four limitations of every solver of \eqref{eq:masked-loss} known
+to us, including~\cite{mairal2008sparse,naumova2018itkrmm,tiefenthaler2018thesis},
+are the following.
+
+\paragraph{L1: binary masks.}
+All cited works treat the mask as $M\in\{0,1\}^d$. A pixel inside the
+hole is either ``trusted at $0$'' or ``not used''. There is no
+mechanism for the solver to assign \emph{partial} trust to a hole
+estimate and update that trust over outer iterations.
+
+\paragraph{L2: no smooth/sparse fusion.}
+Pure dictionary inpainting smears smooth regions; pure biharmonic
+inpainting smears textures. Existing solvers commit to one prior. No
+existing masked-dictionary solver fuses both with a per-pixel,
+data-driven fusion weight.
+
+\paragraph{L3: no non-local coupling inside the masked solver.}
+CSR and GSR demonstrated the value of non-local coefficient coupling on
+fully observed data, but not within a confidence-weighted, masked,
+iterative framework, and not with explicit error bounds.
+
+\paragraph{L4: no remedy for holes $>$ patch size.}
+When a contiguous hole is larger than the patch, every patch interior
+to the hole has $M_q=\bm{0}$, forcing $\alphavec_q=\bm{0}$ at every
+iteration -- a \emph{zero-information plateau} on the loss surface.
+Prior work either avoids this regime experimentally or accepts the
+resulting black smear.
+
+\medskip\noindent
+\textbf{CROWN-Inpaint addresses L1--L4 simultaneously, with formal
+guarantees, while keeping the masked-K-SVD backbone of B1--B4 intact.}
+
+% =====================================================================
+\section{Proposed Contribution: CROWN-Inpaint}
+% =====================================================================
+\label{sec:proposal}
+
+\subsection{High-level architecture}
+
+CROWN-Inpaint is an \emph{outer iterative} solver. Each outer iteration
+performs five steps:
+
+\begin{enumerate}[label=\textbf{Step \arabic*.},leftmargin=4.2em,itemsep=3pt]
+\item \textbf{Confidence map update.} Compute a continuous $c^t\in[0,1]^{H\times W}$ on
+hole pixels from (a) overlap variance of patch reconstructions, (b)
+distance to $\Omega$, and (c) an iteration schedule. Combine with the
+binary mask to form $W^t = M+(1-M)\odot c^t$.
+\item \textbf{Confidence-weighted sparse branch.} For every patch
+$q$, run a weighted-OMP on $(R_q u^{t-1}, D, W^t_q)$, then refine the
+selected codes by a non-local centralised $\ell_1$ ISTA toward the
+group centre $\bm{\beta}_q$. Overlap-average to obtain
+$u^t_{\rm sparse}$.
+\item \textbf{Smooth branch.} Run a small number of harmonic Jacobi
+relaxation steps from $u^{t-1}$, holding $\Omega$ fixed, to obtain
+$u^t_{\rm smooth}$.
+\item \textbf{Regime-aware fusion.} Compute or update a regime map
+$r\in[0,1]^{H\times W}$ from observed gradients, structure-tensor
+anisotropy and DCT spectral entropy; fuse
+$\bar u^t = (1-r)\odot u^t_{\rm smooth} + r\odot u^t_{\rm sparse}$.
+\item \textbf{Hard projection.}
+$u^t = M\odot y + (1-M)\odot \bar u^t$. Optionally apply a small
+stochastic manifold-correction step every few iterations.
+\end{enumerate}
+
+The outer loop is wrapped inside a \emph{three-level coarse-to-fine
+pyramid} that performs the entire procedure at $32\times 32$, then
+$64\times 64$, then $128\times 128$, with the coarse reconstruction
+injected as a warm start to the next finer level.
+
+\subsection{The four genuinely novel mechanisms}
+
+We list the four \emph{additive} novel mechanisms that CROWN-Inpaint
+introduces above the baselines B1--B4 and the gaps L1--L4.
+
+\paragraph{N1 -- Continuous confidence-weighted OMP and outer loop.}
+We replace the binary mask $M$ used by every prior masked-dictionary
+solver by a continuous confidence-weighted $W^t\in[0,1]^d$. Concretely
+we solve, per patch and per outer iteration,
+\begin{equation}
+\min_{\alphavec}\;\norm{(W^t_q)^{1/2}\odot(R_q u^{t-1}-D\alphavec)}_2^2
+\quad\text{s.t.}\;\norm{\alphavec}_0\le s.
+\label{eq:weighted-omp-prob}
+\end{equation}
+The substitution $\widetilde D = \diag\bigl((W^t_q)^{1/2}\bigr)D$,
+$\widetilde x = (W^t_q)^{1/2}\odot R_q u^{t-1}$ reduces
+\eqref{eq:weighted-omp-prob} \emph{exactly} to standard OMP on
+$(\widetilde D,\widetilde x)$ with per-column re-normalisation,
+preserving the reduction trick of binary masked OMP while
+strictly generalising it. The confidence schedule is the key
+mechanism that lets the solver gradually trust its own hole estimates
+without admitting them blindly at iteration~1.
+
+\paragraph{N2 -- Regime-aware fusion of smooth and sparse priors.}
+We introduce a per-pixel regime map $r\in[0,1]^{H\times W}$ computed
+on the \emph{observed} pixels via gradient energy, structure-tensor
+anisotropy, and DCT spectral entropy, and propagated into the hole by
+boundary-conditional Gaussian smoothing. The fusion
+\[
+\bar u = (1-r)\odot u_{\rm smooth} + r\odot u_{\rm sparse}
+\]
+gates two priors with provably complementary regimes of optimality
+(biharmonic on smooth holes; sparse coding on textured holes). To our
+knowledge no prior masked-dictionary inpainting work performs this
+fusion at all, let alone with a learned per-pixel gate.
+
+\paragraph{N3 -- Non-local centralised $\bm{\ell_1}$ coupling inside
+the masked solver.}
+For each patch $q$, define a non-local prior
+\begin{equation}
+\bm{\beta}_q = \sum_{r\in\KNN(q)} w_{qr}\,\alphavec_r,\qquad
+w_{qr}=\frac{\exp(-\norm{R_q u-R_r u}_{W_q\odot W_r}^2/h^2)}{Z_q},
+\end{equation}
+where the similarity weights use \emph{coordinates confidently
+observed in both patches}. Then refine each code by
+\begin{equation}
+\alphavec_q^\star
+= \arg\min_{\alphavec}\;\norm{W_q^{1/2}(R_q u - D\alphavec)}_2^2
++ \lambda\norm{\alphavec - \bm{\beta}_q}_1.
+\label{eq:nsr}
+\end{equation}
+This is a \emph{convex} sub-problem solved by an ISTA loop of $\sim 20$
+iterations on the OMP support. Inspired by CSR
+\cite{dong2011centralized} and GSR \cite{zhang2014groupbased},
+\eqref{eq:nsr} differs in three concrete ways: the data term is
+\emph{confidence-weighted}, the prior $\bm{\beta}_q$ uses
+\emph{double-masked} similarity (so unobserved coordinates do not
+spuriously influence neighbour selection), and the refinement is
+\emph{embedded inside} an iterative masked solver rather than applied
+once on fully observed data.
+
+\paragraph{N4 -- Coarse-to-fine pyramid with prior injection and
+plateau-escape guarantee.}
+Existing single-scale solvers fail catastrophically when the hole side
+$H_\Omega$ exceeds the patch side $p$, because every patch interior to
+the hole has $M_q=\bm{0}$, leading to $\nabla_{\alphavec_q}\Loss\equiv\bm{0}$
+and an irreducible zero-information plateau on the loss surface.
+CROWN-Inpaint runs the entire algorithm at the coarsest pyramid level
+where $H_\Omega/2^{L-1}\le p$ -- at which the dead set is empty -- and
+uses bilinear-upsampled coarse reconstructions as warm starts at
+finer levels. We \emph{prove} (Theorem~\ref{thm:warm} below) that the
+warm start strictly removes the plateau and gives the descent
+algorithm a non-zero gradient on which to act.
+
+\subsection{What CROWN-Inpaint does not claim as novel}
+
+For complete intellectual honesty:
+\begin{enumerate}[label=$\circ$,leftmargin=2.4em,itemsep=2pt]
+\item Masked OMP, masked K-SVD, and the weighted rank-one dictionary
+  update are baselines from
+  \cite{mairal2008sparse,srebro2003weighted,naumova2018itkrmm,tiefenthaler2018thesis}.
+\item The closed-form scalar coordinate ALS we use to implement the
+  rank-one update is a \emph{coordinate-descent variant} of the
+  EM/SVD weighted rank-one update of~\cite{srebro2003weighted}; we
+  re-derive it because the scalar form is faster and avoids any
+  imputation step, but the underlying objective is identical.
+\item The biharmonic smooth branch is~\cite{chan2002mathematical}
+  used as-is.
+\item The non-local idea of regularising codes toward neighbour means
+  is from CSR/GSR; what is novel is its concrete integration into
+  the masked, iterative, confidence-weighted setting (item N3 above).
+\item The pyramid is a classical idea; what is novel is the formal
+  plateau-escape guarantee in the masked-K-SVD setting (item N4).
+\item Plug-and-play stochastic manifold correction is from the
+  diffusion-PnP literature; we use it as an \emph{optional} stabiliser.
+\end{enumerate}
+
+% =====================================================================
+\section{Mathematical Formulation and Inspiration}
+% =====================================================================
+
+We can view CROWN-Inpaint as approximate alternating minimisation of
+the energy
+\begin{align}
+E(u,\{\alphavec_q\})
+\;=\;& \sum_q \norm{W_q^{1/2}\odot(R_q u - D\alphavec_q)}_2^2
+       \;+\; \lambda \sum_{q,\,r\in\KNN(q)} w_{qr}\norm{\alphavec_q-\alphavec_r}_1
+       \nonumber\\
+     &\;+\; \mu\, J_{\rm smooth}(u;\,r)
+       \;+\; \iota_\Omega(u;\,y),
+\label{eq:energy}
+\end{align}
+subject to $\norm{\alphavec_q}_0\le s$. The four terms correspond
+exactly to the four CROWN priors:
+\begin{itemize}[itemsep=2pt]
+\item the \emph{confidence-weighted} data term (mechanism N1) reduces to
+classical masked sparse coding when $W_q=M_q\in\{0,1\}^d$;
+\item the \emph{non-local} term (N3) corresponds to a convex relaxation
+of the $\ell_1$ deviation from $\bm{\beta}_q$ when one notes that
+$\sum_r w_{qr}\norm{\alphavec_q-\alphavec_r}_1 \approx
+\norm{\alphavec_q-\bm{\beta}_q}_1$ to leading order in the centred
+shrinkage analysis;
+\item the \emph{smooth} term (N2) is a Tikhonov / harmonic energy
+locally modulated by the regime map $r$;
+\item the indicator $\iota_\Omega$ implements the hard observation
+constraint (Step~5).
+\end{itemize}
+Each step of the outer iteration corresponds to one block-coordinate
+descent step on \eqref{eq:energy} with a closed-form (or
+near-closed-form) inner solve. The pyramid (N4) corresponds to
+warm-starting the non-convex problem from a coarse minimiser.
+
+\subsection{Inspirations -- one line each}
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item \textbf{Patch sparsity}: K-SVD~\cite{aharon2006ksvd}, masked
+extensions~\cite{mairal2008sparse,naumova2018itkrmm,tiefenthaler2018thesis}.
+\item \textbf{Confidence weighting}: Plug-and-play and reliability-weighted
+estimation, recast for masked OMP.
+\item \textbf{Regime / fusion}: classical observation that biharmonic is
+optimal on smooth holes \cite{chan2002mathematical} and that texture
+needs atom transport from the boundary~\cite{bertalmio2000image}.
+\item \textbf{Non-local centralised refinement}: CSR
+\cite{dong2011centralized}, GSR~\cite{zhang2014groupbased}, with the
+slow-rate Lasso analysis of
+Bickel--Ritov--Tsybakov~\cite{bickel2009simultaneous}.
+\item \textbf{Multi-scale warm start}: the empirical observation that
+single-scale K-SVD fails catastrophically when
+$H_\Omega>p$, formalised via the plateau-escape theorem of
+Sec.~\ref{sec:why-works}.
+\item \textbf{Optional manifold correction}: stochastic plug-and-play
+without requiring a pre-trained denoiser network.
+\end{itemize}
+
+% =====================================================================
+\section{Why It Works: Theoretical Foundations}
+% =====================================================================
+\label{sec:why-works}
+
+We summarise four results that we have already proven for the
+companion convergence document; full proofs are in the technical
+report.
+
+\paragraph{T1: Convergence of the masked dictionary update.}
+For each atom $k$, the per-atom rank-one sub-problem
+\[
+\min_{\dvec_k,\hvec_k}\sum_{i\in\Sk}\norm{M_i(\bm{e}_{k,i}-\dvec_k h_{k,i})}_2^2
+\]
+admits the closed-form scalar updates
+\[
+h_{k,i}=\frac{\sum_j (M_i)_{jj}\,d_{k,j}\,e_{k,i,j}}{\sum_j (M_i)_{jj}\,d_{k,j}^2},
+\quad
+d_{k,j}=\frac{\sum_i (M_i)_{jj}\,h_{k,i}\,e_{k,i,j}}{\sum_i (M_i)_{jj}\,h_{k,i}^2},
+\]
+each of which globally minimises the masked Frobenius cost in its
+single block. Under a standard atom-utilisation assumption, alternating
+the two updates yields a monotonically non-increasing energy converging
+to a coordinate-wise stationary point, and the outer K-SVD loop
+inherits this descent property. \emph{This recovers the known
+guarantee of~\cite{srebro2003weighted}, restated as a coordinate
+descent for clarity and speed.}
+
+\paragraph{T2: Slow-rate Lasso bound for the non-local refinement
+(novel).}
+Define the \textbf{Self-Similarity Index}
+\[
+\mathrm{SSI}_q := \norm{\alphavec_q^{\rm true}-\bm{\beta}_q}_1.
+\]
+
+\begin{theorem}[Self-similarity error bound]
+\label{thm:lasso}
+Under the noise model $R_q u^{\rm true} = D\alphavec_q^{\rm true}+\bm{\nu}_q$,
+$\norm{W_q^{1/2}\bm{\nu}_q}_2\le\delta$, and $\lambda\ge
+2\norm{\widetilde D_q^\top \widetilde{\bm{\nu}}_q}_\infty$, every
+solution $\alphavec_q^\star$ of \eqref{eq:nsr} satisfies
+\[
+\norm{W_q^{1/2}\bigl(R_q u^{\rm true}-D\alphavec_q^\star\bigr)}_2
+\;\le\;\delta+\sqrt{3\lambda\cdot\mathrm{SSI}_q}.
+\]
+\end{theorem}
+
+This is the slow-rate Lasso inequality applied to the centred
+regulariser $\norm{\alphavec-\bm{\beta}_q}_1$ and is, to our
+knowledge, the first explicit error bound for a masked, iterative,
+non-locally coupled sparse-coding step. The proof proceeds by the
+change of variables $\bm{\gamma}=\alphavec-\bm{\beta}_q$, which
+reduces \eqref{eq:nsr} to a standard Lasso whose oracle inequality is
+then applied. The bound captures the expected behaviour: better
+self-similar matches (smaller $\mathrm{SSI}_q$) yield tighter
+reconstruction error.
+
+\paragraph{T3: Plateau-escape via multi-scale warm start (novel).}
+
+\begin{lemma}[Plateau gradient]
+\label{lem:plateau}
+For every patch $q$ with $M_q=\bm{0}$ and any $D$,
+\[
+\nabla_{\alphavec_q}\Loss(D,A)
+\;=\;-2D^\top M_q(R_q u-D\alphavec_q)\;\equiv\;\bm{0}.
+\]
+\end{lemma}
+
+\begin{theorem}[Warm-start removes the plateau]
+\label{thm:warm}
+Let $\widehat u^{(\ell)}$ be the reconstruction at the coarse scale,
+$\mathcal{U}_{\ell\to\ell-1}$ the bilinear upsampler, and define the
+prior-injected initialisation
+\[
+u^{(\ell-1)}_{\rm init}
+=M^{(\ell-1)}\odot y^{(\ell-1)}+(1-M^{(\ell-1)})\odot \mathcal{U}_{\ell\to\ell-1}\bigl(\widehat u^{(\ell)}\bigr).
+\]
+If the upsampling error is at most $\eta$ on the hole and the coarse
+scale has empty dead set, then the gradient of the prior-augmented
+loss at $u^{(\ell-1)}_{\rm init}$ is generically non-zero, the OMP
+sparse coding step returns codes with per-patch fitting error
+$\le n\eta^2$, and one ALS sweep produces a strictly lower
+prior-augmented loss. By contrast, any cold-started iterate
+$(D^{(0)},A=\bm{0})$ on the strict-mask loss is permanently stuck:
+$A^{(t)}_{:,q}=\bm{0}$ for all $t\ge 0$ and every $q$ with $M_q=\bm{0}$.
+\end{theorem}
+
+\paragraph{T4: Composite end-to-end guarantee.}
+Combining T1--T3, the full CROWN-Inpaint pipeline produces a sequence
+$(D^{(t)},A^{(t)})$ at each pyramid level that is monotonically
+non-increasing in the corresponding masked energy, with bounded
+per-patch reconstruction error
+$\le \delta_q+\sqrt{3\lambda\cdot\mathrm{SSI}_q}$ at termination of
+the non-local step. Crucially, T3 ensures that this descent is taken
+\emph{from a non-trivial starting point} on holes larger than the
+patch -- the regime where every prior solver fails.
+
+\begin{remark}
+None of T1--T4 claim global optimality of the recovered $(D,A)$:
+$\ell_0$ sparse coding is NP-hard and OMP is a greedy approximation.
+This caveat is identical to that of classical
+K-SVD~\cite{aharon2006ksvd} and is explicitly inherited by every
+masked-K-SVD-based method in the literature.
+\end{remark}
+
+% =====================================================================
+\section{Experimental Plan}
+% =====================================================================
+
+\subsection{Datasets and masks}
+\begin{description}[leftmargin=2.5em,itemsep=2pt]
+\item[Datasets.] \emph{Peppers} and \emph{Mandrill} ($256\times 256$,
+  for direct comparison with~\cite{tiefenthaler2018thesis}); subsets
+  of \emph{CelebA-HQ} and \emph{Places2} ($128\times 128$ patches);
+  textured subsets from DTD for stress tests.
+\item[Masks.] (a) Random Bernoulli erasure at $30\%/50\%/70\%$
+  (matches~\cite{tiefenthaler2018thesis}); (b) the same \emph{Cracks}
+  structured mask used in~\cite{tiefenthaler2018thesis}; (c)
+  rectangular block holes of side $20{-}40$ at $128\times 128$ to
+  exercise the multi-scale plateau-escape mechanism (no prior solver
+  handles this gracefully); (d) thin scratches and free-form brush
+  masks.
+\end{description}
+
+\subsection{Baselines}
+We benchmark against the following, each implemented or wrapped in our
+codebase:
+\begin{enumerate}[label=(\alph*),itemsep=2pt]
+\item \textbf{Biharmonic / Telea inpainting} (classical, on smooth holes).
+\item \textbf{Plain masked K-SVD} (B1+B2+B3 of Sec.~\ref{sec:related},
+  our own implementation already complete).
+\item \textbf{wKSVDL} of Tiefenthaler~\cite{tiefenthaler2018thesis} (we
+  will re-implement Algorithms 4--5 of that thesis as our principal
+  competing single-scale baseline).
+\item \textbf{ITKrMM} of Naumova--Schnass~\cite{naumova2018itkrmm}.
+\item \textbf{CSR/GSR-style} non-local sparse representation
+  \cite{dong2011centralized,zhang2014groupbased}, where feasible
+  given the masked setting.
+\item \textbf{CROWN-Inpaint} (full method, our contribution).
+\item Deep baselines (\emph{stretch goal}): a single LaMa or
+  partial-conv pre-trained model, as a sanity reference -- we are an
+  optimisation-first method and do not aim to beat large pretrained
+  models.
+\end{enumerate}
+
+\subsection{Ablations (the experimental core of the paper)}
+
+We will run ablation rows that toggle each of the four CROWN mechanisms
+on/off independently:
+
+\begin{center}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Variant & N1 conf. & N2 regime & N3 nonlocal & N4 pyramid \\
+\midrule
+Plain masked K-SVD & -- & -- & -- & -- \\
++N1 only           & \checkmark & -- & -- & -- \\
++N2 only           & -- & \checkmark & -- & -- \\
++N3 only           & -- & -- & \checkmark & -- \\
++N4 only           & -- & -- & -- & \checkmark \\
++N1+N3             & \checkmark & -- & \checkmark & -- \\
++N1+N4             & \checkmark & -- & -- & \checkmark \\
+\textbf{CROWN-Inpaint (full)} & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+This table is precisely what reviewers will demand and exactly what
+distinguishes us from~\cite{tiefenthaler2018thesis}, which only varies
+the low-rank dimension $L\in\{1,3,8\}$.
+
+\subsection{Metrics}
+PSNR, SSIM, hole-only PSNR, boundary MAE, mean wall-clock per image,
+and number of outer iterations to convergence. We will report mean and
+standard deviation over five random seeds per (image, mask) pair, as
+in~\cite{tiefenthaler2018thesis}.
+
+\subsection{Hypotheses we will test}
+
+\begin{description}[leftmargin=2.4em,itemsep=2pt]
+\item[H1.] N1 (continuous confidence) gives a $\ge 0.5$ dB
+  hole-PSNR improvement at $r\ge 50\%$ over binary-mask wKSVDL.
+\item[H2.] N2 (regime fusion) eliminates the texture-vs-smooth
+  trade-off observed by~\cite{tiefenthaler2018thesis}: the same
+  CROWN configuration wins both Peppers (smooth) and Mandrill
+  (textured), unlike wKSVDL which loses to ITKrMM on Mandrill.
+\item[H3.] N3 (non-local) reduces variance of reconstruction across
+  random seeds by $\ge 30\%$ at $r=70\%$.
+\item[H4.] N4 (pyramid) recovers semantically meaningful content in
+  $\ge 20\times 20$ block holes where every single-scale baseline
+  produces a black smear.
+\end{description}
+
+% =====================================================================
+\section{Implementation Status}
+% =====================================================================
+
+The codebase is already organised around the architecture above.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+File & Component & Status \\
+\midrule
+\texttt{masked\_ksvd.py}              & Masked OMP + ALS update (B1, B2)        & complete \\
+\texttt{inpainting\_masked\_ksvd.py}  & Single-scale masked inpainting           & complete \\
+\texttt{inpainting\_multiscale\_masked\_ksvd.py} & 3-level pyramid (N4)        & complete \\
+\texttt{crown/confidence.py}          & Confidence map (N1)                      & complete \\
+\texttt{crown/regime.py}              & Regime map (N2)                          & complete \\
+\texttt{crown/weighted\_omp.py}       & Confidence-weighted OMP (N1)             & complete \\
+\texttt{crown/nonlocal\_coupling.py}  & Non-local centralised ISTA (N3)          & complete \\
+\texttt{crown/smooth.py}              & Biharmonic / harmonic Jacobi             & complete \\
+\texttt{crown/fuse.py}                & Regime-aware fusion + projection         & complete \\
+\texttt{crown/manifold.py}            & Optional stochastic correction           & complete \\
+\texttt{crown/run.py}                 & Outer-loop driver                        & complete \\
+\texttt{experiment\_sweep.py}         & Ablation grid                            & in progress \\
+wKSVDL re-implementation              & Tiefenthaler 2018 baseline              & to do \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The convergence-and-error analysis is also written up as a separate
+technical companion document \texttt{convergence\_proofs.tex}
+(IEEE format, 9 pages). It contains full proofs of T1--T4.
+
+% =====================================================================
+\section{Timeline and Deliverables}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{8.5cm}@{}}
+\toprule
+Week & Milestone & Notes \\
+\midrule
+W1   & wKSVDL re-implementation & Algorithms 4--5 of~\cite{tiefenthaler2018thesis}, validated to match the thesis's Peppers/Mandrill PSNRs ($\pm 0.3$ dB). \\
+W2   & Ablation sweep          & 8-row ablation $\times$ 4 mask types $\times$ 2 images $\times$ 5 seeds. \\
+W3   & Multi-scale stress test & $20\times 20$ and $40\times 40$ block holes; visual + numerical comparison with all single-scale baselines. \\
+W4   & Paper draft -- main     & Sections 1--4 (introduction, related work, method, theory). \\
+W5   & Paper draft -- experiments & Section 5; integrate plots from W2--W3. \\
+W6   & Internal review         & Course staff feedback; revise. \\
+W7   & Final submission        & PDF + reproducible code repository + raw experimental data. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{Final deliverables:}
+\begin{enumerate}[label=\textbf{D\arabic*.},leftmargin=2.6em,itemsep=2pt]
+\item Paper PDF (8--10 pages, IEEE format) describing the method,
+  theory, and experiments.
+\item Companion convergence-proof document
+  (\texttt{convergence\_proofs.tex}, already drafted).
+\item Reproducible code repository with all eight ablation rows and
+  every baseline.
+\item Experimental data (\texttt{.csv} + \texttt{.npy}) and a
+  notebook reproducing every figure in the paper.
+\end{enumerate}
+
+% =====================================================================
+\section{Risks and Mitigations}
+% =====================================================================
+
+\paragraph{R1: Tiefenthaler 2018 covers more of the masked-dictionary
+ground than expected.}
+\emph{Already incurred and accommodated.} The present proposal
+explicitly demotes masked K-SVD itself to a baseline and re-centres
+novelty on the four CROWN mechanisms (N1--N4). No further pivot is
+required.
+
+\paragraph{R2: Non-local refinement is too slow for $128\times 128$
+images.}
+We restrict the centralised $\ell_1$ refinement to the OMP support
+(at most $s\le 12$ atoms), turning a $K$-dim convex problem into an
+$s$-dim one. ISTA on $s$-dim problems is $O(s^2)$ per iteration with
+$\sim 20$ iterations; total cost is dominated by the OMP step.
+
+\paragraph{R3: The pyramid leaks coarse-scale artefacts upward.}
+We perform mask-aware downsampling (normalised convolution that
+excludes hole pixels from the aggregation) at every level transition;
+this is already implemented in
+\texttt{inpainting\_multiscale\_masked\_ksvd.py}. We will additionally
+ablate the upsampling kernel.
+
+\paragraph{R4: Manifold correction destabilises convergence.}
+We treat it as optional (off by default) and include it only as an
+ablation knob, with a decreasing $\sigma_t=\sigma_0\gamma^{t-1}$
+schedule that bounds its long-run effect.
+
+\paragraph{R5: Reviewers question whether N1+N2+N3+N4 are independent
+or redundant.}
+The 8-row ablation table directly answers this: each row toggles a
+single mechanism, and we will report the marginal PSNR contribution of
+each.
+
+% =====================================================================
+\section{Expected Outcomes and Publication Target}
+% =====================================================================
+
+\begin{itemize}[itemsep=3pt]
+\item A complete, theoretically-grounded, optimisation-first
+  inpainting method that beats every single-scale masked-dictionary
+  baseline (including wKSVDL) by $1{-}3$ dB on standard benchmarks
+  and produces visually coherent fills on holes that are
+  $2{-}5\times$ the patch size.
+\item Four formal results (T1--T4) with full proofs; T2--T4 are, to
+  our knowledge, new in the masked-dictionary inpainting literature.
+\item A clean ablation table that pinpoints the marginal contribution
+  of each CROWN mechanism.
+\item A reproducible code repository.
+\end{itemize}
+
+\noindent\textbf{Submission target.} A workshop or short paper at
+ICIP / ICASSP 2026, or a journal extension to \emph{IEEE Trans.\ Image
+Processing} or \emph{IEEE Trans.\ Computational Imaging}; we will
+make a final venue decision after the W6 internal review based on
+experimental strength.
+
+% =====================================================================
+\section*{Acknowledgements}
+% =====================================================================
+We thank the course staff of CS 754 (Spring 2026, IIT Bombay) for
+supervision and feedback, and explicitly acknowledge
+M.~Tiefenthaler and K.~Schnass~\cite{tiefenthaler2018thesis} for the
+clearest exposition of single-scale masked K-SVD inpainting we have
+encountered, against which CROWN-Inpaint is benchmarked.
+
+% =====================================================================
+\begin{thebibliography}{99}
+% =====================================================================
+
+\bibitem{aharon2006ksvd}
+M.~Aharon, M.~Elad, and A.~Bruckstein,
+``K-SVD: An algorithm for designing overcomplete dictionaries for sparse
+representation,''
+\emph{IEEE Trans. Signal Process.}, vol.~54, no.~11, pp.~4311--4322, 2006.
+
+\bibitem{mairal2008sparse}
+J.~Mairal, M.~Elad, and G.~Sapiro,
+``Sparse representation for color image restoration,''
+\emph{IEEE Trans. Image Process.}, vol.~17, no.~1, pp.~53--69, 2008.
+
+\bibitem{srebro2003weighted}
+N.~Srebro and T.~Jaakkola,
+``Weighted low-rank approximations,''
+in \emph{Proc.\ Int.\ Conf.\ Machine Learning (ICML)}, 2003,
+pp.~720--727.
+
+\bibitem{naumova2018itkrmm}
+V.~Naumova and K.~Schnass,
+``Dictionary learning from incomplete data for efficient image
+restoration,''
+in \emph{Proc.\ European Signal Processing Conf.\ (EUSIPCO)}, 2017
+(see also their full ITKrMM manuscript, \emph{Inverse Problems and
+Imaging}, 2018).
+
+\bibitem{tiefenthaler2018thesis}
+M.~Tiefenthaler,
+``Integrating low-rank components into weighted K-SVD for dictionary
+based inpainting,''
+Bachelor thesis, Department of Mathematics, University of Innsbruck,
+Austria, supervised by K.~Schnass, September 2018.
+
+\bibitem{tropp2007omp}
+J.~A.~Tropp and A.~C.~Gilbert,
+``Signal recovery from random measurements via orthogonal matching
+pursuit,''
+\emph{IEEE Trans. Inf. Theory}, vol.~53, no.~12, pp.~4655--4666, 2007.
+
+\bibitem{dong2011centralized}
+W.~Dong, L.~Zhang, and G.~Shi,
+``Centralized sparse representation for image restoration,''
+in \emph{Proc.\ IEEE Int.\ Conf.\ Computer Vision (ICCV)}, 2011,
+pp.~1259--1266.
+
+\bibitem{zhang2014groupbased}
+J.~Zhang, D.~Zhao, and W.~Gao,
+``Group-based sparse representation for image restoration,''
+\emph{IEEE Trans. Image Process.}, vol.~23, no.~8, pp.~3336--3351,
+2014.
+
+\bibitem{chan2002mathematical}
+T.~F.~Chan and J.~Shen,
+``Mathematical models for local nontexture inpaintings,''
+\emph{SIAM J. Appl. Math.}, vol.~62, no.~3, pp.~1019--1043, 2002.
+
+\bibitem{bertalmio2000image}
+M.~Bertalmio, G.~Sapiro, V.~Caselles, and C.~Ballester,
+``Image inpainting,''
+in \emph{Proc.\ ACM SIGGRAPH}, 2000, pp.~417--424.
+
+\bibitem{bickel2009simultaneous}
+P.~J.~Bickel, Y.~Ritov, and A.~B.~Tsybakov,
+``Simultaneous analysis of Lasso and Dantzig selector,''
+\emph{Ann. Statist.}, vol.~37, no.~4, pp.~1705--1732, 2009.
+
+\bibitem{beck2009fista}
+A.~Beck and M.~Teboulle,
+``A fast iterative shrinkage-thresholding algorithm for linear inverse
+problems,''
+\emph{SIAM J. Imaging Sci.}, vol.~2, no.~1, pp.~183--202, 2009.
+
+\bibitem{tseng2001convergence}
+P.~Tseng,
+``Convergence of a block coordinate descent method for nondifferentiable
+minimization,''
+\emph{J. Optim. Theory Appl.}, vol.~109, no.~3, pp.~475--494, 2001.
+
+\end{thebibliography}
+
+\end{document}
