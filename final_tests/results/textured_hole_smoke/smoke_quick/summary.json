@@ -1,0 +1,52 @@
+{
+  "script_version": "1.0",
+  "created_utc": "2026-05-02T17:24:21.842845+00:00",
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.5 (main, Jun 11 2025, 15:36:57) [Clang 17.0.0 (clang-1700.0.13.3)]",
+  "parameters": {
+    "seed": 42,
+    "crop_size": 128,
+    "hole_size": 24,
+    "K": 16,
+    "sparsity": 3,
+    "n_train": 100,
+    "dict_iters": 2,
+    "als_iters": 2,
+    "crown_T": 1,
+    "K_s": 10,
+    "quick": true
+  },
+  "headline": {
+    "metric": "mean(crown_full hole_psnr - biharmonic hole_psnr)",
+    "crown_minus_biharmonic_hole_psnr_db": 0.2906296674515332,
+    "per_crop_deltas_db": [
+      0.2906296674515332
+    ]
+  },
+  "method_summary": {
+    "biharmonic": {
+      "n": 1,
+      "hole_psnr_mean": 20.416038136655125,
+      "hole_psnr_std": 0.0,
+      "full_psnr_mean": 34.956012695380366,
+      "full_ssim_mean": 0.983183113027284,
+      "runtime_sec_mean": 0.005853891372680664
+    },
+    "masked_ksvd": {
+      "n": 1,
+      "hole_psnr_mean": 11.038864232221561,
+      "hole_psnr_std": 0.0,
+      "full_psnr_mean": 25.578838790946804,
+      "full_ssim_mean": 0.9632666601286134,
+      "runtime_sec_mean": 1.025498628616333
+    },
+    "crown_full": {
+      "n": 1,
+      "hole_psnr_mean": 20.706667804106658,
+      "hole_psnr_std": 0.0,
+      "full_psnr_mean": 35.246642362831906,
+      "full_ssim_mean": 0.983803049409677,
+      "runtime_sec_mean": 1.117539644241333
+    }
+  }
+}
