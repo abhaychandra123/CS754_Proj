@@ -1,0 +1,113 @@
+{
+  "script_version": "1.0",
+  "created_utc": "2026-05-02T19:10:45.158285+00:00",
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.5 (main, Jun 11 2025, 15:36:57) [Clang 17.0.0 (clang-1700.0.13.3)]",
+  "parameters": {
+    "seed": 42,
+    "image_size": 128,
+    "images": [
+      "brick",
+      "camera",
+      "coins",
+      "moon",
+      "astronaut"
+    ],
+    "missing_ratios": [
+      0.1,
+      0.3,
+      0.5,
+      0.7
+    ],
+    "K": 256,
+    "sparsity": 8,
+    "n_train": 3000,
+    "dict_iters": 25,
+    "als_iters": 10,
+    "crown_T": 5,
+    "K_s": 10,
+    "quick": false
+  },
+  "headline": {
+    "metric": "mean hole_psnr across images",
+    "ksvd_minus_biharmonic_by_ratio": {
+      "0.1": -2.8338144419595253,
+      "0.3": -2.206689841545966,
+      "0.5": -3.397715487322028,
+      "0.7": -6.211924996041475
+    },
+    "ksvd_biharmonic_linear_crossover_missing_ratio": null,
+    "first_discrete_ratio_where_ksvd_beats_biharmonic": null,
+    "crown_minus_biharmonic_by_ratio": {
+      "0.1": 0.5395420972385949,
+      "0.3": 0.48764966860041525,
+      "0.5": 0.233703694176306,
+      "0.7": -1.2078921990321696
+    },
+    "crown_minus_ksvd_by_ratio": {
+      "0.1": 3.37335653919812,
+      "0.3": 2.6943395101463814,
+      "0.5": 3.631419181498334,
+      "0.7": 5.004032797009305
+    },
+    "crown_margin_vs_best_baseline_by_ratio": {
+      "0.1": 0.5395420972385949,
+      "0.3": 0.48764966860041525,
+      "0.5": 0.233703694176306,
+      "0.7": -1.2078921990321696
+    },
+    "crown_dominates_all_ratios": false
+  },
+  "per_image_crossover": {
+    "brick": {
+      "ksvd_minus_biharmonic_by_ratio": {
+        "0.1": 8.199656726507989,
+        "0.3": 8.464288542156488,
+        "0.5": 2.938982593791607,
+        "0.7": 0.36985721553988427
+      },
+      "linear_crossover_missing_ratio": 0.1,
+      "first_discrete_ratio_where_ksvd_beats_biharmonic": 0.1
+    },
+    "camera": {
+      "ksvd_minus_biharmonic_by_ratio": {
+        "0.1": -3.19861157242563,
+        "0.3": -4.24826840870282,
+        "0.5": -1.87308764675074,
+        "0.7": -4.781087816402103
+      },
+      "linear_crossover_missing_ratio": null,
+      "first_discrete_ratio_where_ksvd_beats_biharmonic": null
+    },
+    "coins": {
+      "ksvd_minus_biharmonic_by_ratio": {
+        "0.1": -0.11390944599235198,
+        "0.3": 0.5598533740479006,
+        "0.5": -2.8143520026426536,
+        "0.7": -9.339206741437767
+      },
+      "linear_crossover_missing_ratio": 0.13381292128453948,
+      "first_discrete_ratio_where_ksvd_beats_biharmonic": 0.3
+    },
+    "moon": {
+      "ksvd_minus_biharmonic_by_ratio": {
+        "0.1": -15.564081149170487,
+        "0.3": -14.889952831319253,
+        "0.5": -12.980667004440313,
+        "0.7": -11.271420703740006
+      },
+      "linear_crossover_missing_ratio": null,
+      "first_discrete_ratio_where_ksvd_beats_biharmonic": null
+    },
+    "astronaut": {
+      "ksvd_minus_biharmonic_by_ratio": {
+        "0.1": -3.492126768717121,
+        "0.3": -0.9193698839121289,
+        "0.5": -2.2594533765680644,
+        "0.7": -6.037766934167358
+      },
+      "linear_crossover_missing_ratio": null,
+      "first_discrete_ratio_where_ksvd_beats_biharmonic": null
+    }
+  }
+}

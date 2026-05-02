@@ -1,35 +1,35 @@
 {
   "parameters": {
     "seed": 42,
-    "K": 256,
-    "sparsity": 8,
-    "dict_iters": 15,
+    "K": 128,
+    "sparsity": 6,
+    "dict_iters": 5,
     "als_iters": 10,
-    "n_train": 3000,
-    "crown_T": 5
+    "n_train": 1000,
+    "crown_T": 3
   },
   "by_size": {
     "256": {
       "biharmonic": {
-        "hole_psnr": 19.431442074192702,
-        "full_psnr": 31.47264190075195,
-        "full_ssim": 0.9624039375457413,
-        "runtime_sec": ""
+        "hole_psnr": 17.98961153687241,
+        "full_psnr": 30.03081136343166,
+        "full_ssim": 0.9671005271272624,
+        "runtime_sec": 0.06298971176147461
       },
       "masked_ksvd": {
-        "hole_psnr": 8.189948726445607,
-        "full_psnr": 20.231148553004857,
-        "full_ssim": 0.9341561604105832,
-        "runtime_sec": ""
+        "hole_psnr": 8.544751453082792,
+        "full_psnr": 20.58595127964204,
+        "full_ssim": 0.9383384842878235,
+        "runtime_sec": 32.36086368560791
       },
       "crown": {
-        "hole_psnr": 16.159559501226944,
-        "full_psnr": 28.200759327786194,
-        "full_ssim": 0.9560294465653625,
-        "runtime_sec": ""
+        "hole_psnr": 15.811485841424345,
+        "full_psnr": 27.852685667983593,
+        "full_ssim": 0.9625220036443934,
+        "runtime_sec": 1023.4171109199524
       },
-      "crown_minus_biharmonic_hole_psnr": -3.271882572965758,
-      "masked_ksvd_minus_biharmonic_hole_psnr": -11.241493347747095
+      "crown_minus_biharmonic_hole_psnr": -2.178125695448065,
+      "masked_ksvd_minus_biharmonic_hole_psnr": -9.444860083789617
     }
   }
 }
