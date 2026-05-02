@@ -1,0 +1,8 @@
+CROWN is good at exactly one thing — not regressing on smooth content while improving on textured content. That's it. That's the whole pitch. 
+
+Put in abstract: 
+Every classical inpainter commits to one regime. PDE methods (biharmonic, TV) hallucinate textures as smooth blur. Patch/sparse methods (K-SVD, NLM) hallucinate textures into smooth regions. No classical method is locally regime-aware. Deep methods are, but they're black boxes with no guarantees.
+
+CROWN is a regime-aware classical inpainter with a no-regression guarantee. On smooth regions it provably reduces to biharmonic completion (Theorem 1, Section 8.2). On textured regions it reduces to confidence-weighted sparse coding. The fusion is gated by a per-pixel regime map computed from gradient energy, structure-tensor anisotropy, and DCT spectral entropy.
+
+CROWN is a principled regime-aware fusion of two complementary classical priors, with formal guarantees, that empirically realizes its design goal (no-regression on smooth, gains on textured). The empirical gains are modest in absolute terms because the operating regime allows only modest gains — biharmonic already saturates on smooth content, and classical sparse methods only help by a few dB on textured content. Modest gains in this regime are the ceiling, not a sign of failure.

@@ -9,6 +9,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -24,7 +28,7 @@ from custom_masks import square_hole_mask
 from masked_ksvd import masked_ksvd, masked_omp
 
 
-OUTPUT_DIR = Path("outputs/big_image_try")
+OUTPUT_DIR = PROJECT_ROOT / "final_tests" / "results" / "big_image_try"
 SEED = 42
 K = 256
 SPARSITY = 8
@@ -66,11 +70,10 @@ def run_masked_ksvd_image(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
         label="Big image masked K-SVD",
     )
 
-    alpha = np.zeros((K, X_nan.shape[1]), dtype=np.float64)
-    full_mask = np.ones(X_nan.shape[0], dtype=np.float64)
+    alpha = np.zeros((D.shape[1], X_nan.shape[1]), dtype=np.float64)
+    s_eff = min(SPARSITY, D.shape[1])
     for i in range(X_nan.shape[1]):
-        signal = np.nan_to_num(X_nan[:, i], nan=0.0)
-        alpha[:, i] = masked_omp(signal, D, full_mask, min(SPARSITY, K))
+        alpha[:, i] = masked_omp(X_nan[:, i], D, M_all[:, i], s_eff)
 
     pred = reconstruct_image_from_codes(D, alpha, img.shape)
     return hard_project(pred, img, mask)
