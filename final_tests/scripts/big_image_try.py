@@ -6,6 +6,7 @@ Inpaint on resized versions of the same reference image.
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import math
@@ -32,7 +33,7 @@ from crown.run import run_crown_inpaint, train_dictionary
 from crown.smooth import biharmonic_init
 from crown.utils import extract_patches_with_mask, reconstruct_image_from_codes
 from custom_masks import square_hole_mask
-from masked_ksvd import masked_ksvd, masked_omp
+from masked_ksvd import masked_omp
 
 
 OUTPUT_DIR = PROJECT_ROOT / "final_tests" / "results" / "big_image_try"
@@ -42,6 +43,8 @@ SPARSITY = 8
 DICT_ITERS = 15
 ALS_ITERS = 10
 TRAIN_PATCHES = 3000
+CROWN_T = 5
+SIZES = [256, 512]
 
 
 brick_512 = skdata.brick().astype(np.float64) / 255.0
@@ -53,10 +56,63 @@ METHOD_LABELS = {
 }
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run larger brick inpainting comparisons.")
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    parser.add_argument("--sizes", default=",".join(str(size) for size in SIZES))
+    parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument("--K", type=int, default=K)
+    parser.add_argument("--sparsity", type=int, default=SPARSITY)
+    parser.add_argument("--dict-iters", type=int, default=DICT_ITERS)
+    parser.add_argument("--als-iters", type=int, default=ALS_ITERS)
+    parser.add_argument("--n-train", type=int, default=TRAIN_PATCHES)
+    parser.add_argument("--crown-T", type=int, default=CROWN_T)
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help=(
+            "Use cheaper settings: K=128, s=6, dict_iters=5, n_train=1000, "
+            "crown_T=3, and only 256 unless --sizes is explicitly set."
+        ),
+    )
+    return parser.parse_args()
+
+
+def parse_sizes(value: str) -> list[int]:
+    sizes = [int(part.strip()) for part in value.split(",") if part.strip()]
+    if not sizes:
+        raise ValueError("at least one size is required")
+    return sizes
+
+
+def apply_args(args: argparse.Namespace) -> list[int]:
+    global OUTPUT_DIR, SEED, K, SPARSITY, DICT_ITERS, ALS_ITERS, TRAIN_PATCHES, CROWN_T
+
+    sizes_was_default = args.sizes == ",".join(str(size) for size in SIZES)
+    if args.fast:
+        args.K = min(args.K, 128)
+        args.sparsity = min(args.sparsity, 6)
+        args.dict_iters = min(args.dict_iters, 5)
+        args.n_train = min(args.n_train, 1000)
+        args.crown_T = min(args.crown_T, 3)
+        if sizes_was_default:
+            args.sizes = "256"
+
+    OUTPUT_DIR = args.output_dir
+    SEED = int(args.seed)
+    K = int(args.K)
+    SPARSITY = int(args.sparsity)
+    DICT_ITERS = int(args.dict_iters)
+    ALS_ITERS = int(args.als_iters)
+    TRAIN_PATCHES = int(args.n_train)
+    CROWN_T = int(args.crown_T)
+    return parse_sizes(args.sizes)
+
+
 def make_square_hole(size: int, hole_size: int | None = None) -> np.ndarray:
     if hole_size is None:
         hole_size = size // 4
-    return square_hole_mask((size, size), square_size=hole_size)
+    return square_hole_mask((size, size), square_size=hole_size, center=None)
 
 
 def hard_project(pred: np.ndarray, clean: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -91,30 +147,14 @@ def compute_metrics(clean: np.ndarray, pred: np.ndarray, mask: np.ndarray) -> di
         "hole_psnr": psnr_from_mse(hole_mse),
         "hole_mse": hole_mse,
         "hole_mae": float(np.mean(np.abs(clean[hole] - pred[hole]))),
-        "boundary_mae": float(np.mean(np.abs(clean[band] - pred[band]))),
+        "boundary_mae": float(np.mean(np.abs(clean[band] - pred[band]))) if band.any() else 0.0,
         "observed_max_abs_err": float(np.max(np.abs(clean[mask == 1] - pred[mask == 1]))),
     }
 
 
-def run_masked_ksvd_image(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
+def run_masked_ksvd_image(img: np.ndarray, mask: np.ndarray, D: np.ndarray) -> np.ndarray:
     y = img * mask
     _, X_nan, M_all, _ = extract_patches_with_mask(y, mask)
-
-    rng = np.random.default_rng(SEED)
-    idx = rng.choice(X_nan.shape[1], size=min(TRAIN_PATCHES, X_nan.shape[1]), replace=False)
-    X_train = X_nan[:, idx]
-    M_train = M_all[:, idx]
-
-    D, _, _ = masked_ksvd(
-        X_train,
-        M_train,
-        K=K,
-        s=min(SPARSITY, K),
-        n_iter=DICT_ITERS,
-        als_iters=ALS_ITERS,
-        seed=SEED,
-        label="Big image masked K-SVD",
-    )
 
     alpha = np.zeros((D.shape[1], X_nan.shape[1]), dtype=np.float64)
     s_eff = min(SPARSITY, D.shape[1])
@@ -135,6 +175,7 @@ def write_results_csv(rows: list[dict[str, object]]) -> None:
         "dict_iters",
         "als_iters",
         "crown_T",
+        "dict_train_sec",
         "runtime_sec",
         "full_psnr",
         "full_ssim",
@@ -162,7 +203,7 @@ def write_summary(rows: list[dict[str, object]]) -> None:
             "dict_iters": DICT_ITERS,
             "als_iters": ALS_ITERS,
             "n_train": TRAIN_PATCHES,
-            "crown_T": 5,
+            "crown_T": CROWN_T,
         },
         "by_size": {},
     }
@@ -217,7 +258,8 @@ def save_results(
             "n_train": TRAIN_PATCHES,
             "dict_iters": DICT_ITERS,
             "als_iters": ALS_ITERS,
-            "crown_T": 5 if method == "crown" else "",
+            "crown_T": CROWN_T if method == "crown" else "",
+            "dict_train_sec": runtimes.get("dict_train", ""),
             "runtime_sec": runtimes.get(method, ""),
         }
         row.update(compute_metrics(clean, pred, mask))
@@ -252,8 +294,17 @@ def save_results(
 
 
 def main() -> None:
+    sizes = apply_args(parse_args())
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(
+        f"[big-image] sizes={sizes}, K={K}, s={SPARSITY}, n_train={TRAIN_PATCHES}, "
+        f"dict_iters={DICT_ITERS}, crown_T={CROWN_T}"
+    )
+    print(f"[big-image] writing to {OUTPUT_DIR}")
+
     all_rows = []
-    for size in [256, 512]:
+    for size in sizes:
+        print(f"[big-image] size {size}x{size}")
         img = sk_resize(brick_512, (size, size), anti_aliasing=True, preserve_range=False)
         mask = make_square_hole(size, hole_size=size // 4)
         y = img * mask
@@ -261,10 +312,6 @@ def main() -> None:
         t0 = time.time()
         u_bh = biharmonic_init(y, mask)
         bh_time = time.time() - t0
-
-        t0 = time.time()
-        u_ksvd = run_masked_ksvd_image(img, mask)
-        ksvd_time = time.time() - t0
 
         t0 = time.time()
         D, _ = train_dictionary(
@@ -278,9 +325,23 @@ def main() -> None:
             seed=SEED,
             verbose=False,
         )
-        out = run_crown_inpaint(y, mask, D, T=5, sparsity=min(SPARSITY, K), verbose=False)
+        dict_time = time.time() - t0
+
+        t0 = time.time()
+        u_ksvd = run_masked_ksvd_image(img, mask, D)
+        ksvd_sparse_time = time.time() - t0
+
+        t0 = time.time()
+        out = run_crown_inpaint(
+            y,
+            mask,
+            D,
+            T=CROWN_T,
+            sparsity=min(SPARSITY, K),
+            verbose=False,
+        )
         u_crown = hard_project(out["u"], img, mask)
-        crown_time = time.time() - t0
+        crown_loop_time = time.time() - t0
 
         rows = save_results(
             size,
@@ -294,11 +355,17 @@ def main() -> None:
             },
             {
                 "biharmonic": bh_time,
-                "masked_ksvd": ksvd_time,
-                "crown": crown_time,
+                "dict_train": dict_time,
+                "masked_ksvd": dict_time + ksvd_sparse_time,
+                "crown": dict_time + crown_loop_time,
             },
         )
         all_rows.extend(rows)
+        print(
+            f"  trained shared D in {dict_time:.1f}s; "
+            f"K-SVD sparse pass {ksvd_sparse_time:.1f}s; "
+            f"CROWN loop {crown_loop_time:.1f}s"
+        )
 
     write_results_csv(all_rows)
     write_summary(all_rows)
