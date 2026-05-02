@@ -1,0 +1,57 @@
+{
+  "script_version": "1.0",
+  "created_utc": "2026-05-02T17:44:28.182892+00:00",
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.5 (main, Jun 11 2025, 15:36:57) [Clang 17.0.0 (clang-1700.0.13.3)]",
+  "parameters": {
+    "seed": 42,
+    "image_size": 128,
+    "images": [
+      "brick"
+    ],
+    "missing_ratios": [
+      0.1,
+      0.3
+    ],
+    "K": 16,
+    "sparsity": 3,
+    "n_train": 100,
+    "dict_iters": 2,
+    "als_iters": 2,
+    "crown_T": 1,
+    "K_s": 10,
+    "quick": true
+  },
+  "headline": {
+    "metric": "mean hole_psnr across images",
+    "ksvd_minus_biharmonic_by_ratio": {
+      "0.1": -2.840048938959537,
+      "0.3": -1.2381909309250005
+    },
+    "ksvd_biharmonic_linear_crossover_missing_ratio": null,
+    "first_discrete_ratio_where_ksvd_beats_biharmonic": null,
+    "crown_minus_biharmonic_by_ratio": {
+      "0.1": -0.28574664551609885,
+      "0.3": 0.23346665105151132
+    },
+    "crown_minus_ksvd_by_ratio": {
+      "0.1": 2.5543022934434383,
+      "0.3": 1.4716575819765119
+    },
+    "crown_margin_vs_best_baseline_by_ratio": {
+      "0.1": -0.28574664551609885,
+      "0.3": 0.23346665105151132
+    },
+    "crown_dominates_all_ratios": false
+  },
+  "per_image_crossover": {
+    "brick": {
+      "ksvd_minus_biharmonic_by_ratio": {
+        "0.1": -2.840048938959537,
+        "0.3": -1.2381909309250005
+      },
+      "linear_crossover_missing_ratio": null,
+      "first_discrete_ratio_where_ksvd_beats_biharmonic": null
+    }
+  }
+}
