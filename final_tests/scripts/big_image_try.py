@@ -6,7 +6,11 @@ Inpaint on resized versions of the same reference image.
 
 from __future__ import annotations
 
+import csv
+import json
+import math
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,7 +22,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import binary_dilation, binary_erosion
 from skimage import data as skdata
+from skimage.metrics import peak_signal_noise_ratio as psnr_fn
+from skimage.metrics import structural_similarity as ssim_fn
 from skimage.transform import resize as sk_resize
 
 from crown.run import run_crown_inpaint, train_dictionary
@@ -39,6 +46,12 @@ TRAIN_PATCHES = 3000
 
 brick_512 = skdata.brick().astype(np.float64) / 255.0
 
+METHOD_LABELS = {
+    "biharmonic": "Biharmonic",
+    "masked_ksvd": "Masked K-SVD",
+    "crown": "CROWN",
+}
+
 
 def make_square_hole(size: int, hole_size: int | None = None) -> np.ndarray:
     if hole_size is None:
@@ -48,6 +61,39 @@ def make_square_hole(size: int, hole_size: int | None = None) -> np.ndarray:
 
 def hard_project(pred: np.ndarray, clean: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return np.clip(np.where(mask == 1, clean, pred), 0.0, 1.0)
+
+
+def mse(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.mean((a - b) ** 2))
+
+
+def psnr_from_mse(value: float) -> float:
+    return float(10.0 * math.log10(1.0 / max(value, 1e-12)))
+
+
+def boundary_band(mask: np.ndarray, radius: int = 2) -> np.ndarray:
+    hole = mask == 0
+    outer = binary_dilation(hole, iterations=radius)
+    inner = binary_erosion(hole, iterations=radius, border_value=0)
+    return outer & ~inner
+
+
+def compute_metrics(clean: np.ndarray, pred: np.ndarray, mask: np.ndarray) -> dict[str, float]:
+    hole = mask == 0
+    band = boundary_band(mask)
+    full_mse = mse(clean, pred)
+    hole_mse = mse(clean[hole], pred[hole])
+    return {
+        "full_psnr": float(psnr_fn(clean, pred, data_range=1.0)),
+        "full_ssim": float(ssim_fn(clean, pred, data_range=1.0)),
+        "full_mse": full_mse,
+        "full_mae": float(np.mean(np.abs(clean - pred))),
+        "hole_psnr": psnr_from_mse(hole_mse),
+        "hole_mse": hole_mse,
+        "hole_mae": float(np.mean(np.abs(clean[hole] - pred[hole]))),
+        "boundary_mae": float(np.mean(np.abs(clean[band] - pred[band]))),
+        "observed_max_abs_err": float(np.max(np.abs(clean[mask == 1] - pred[mask == 1]))),
+    }
 
 
 def run_masked_ksvd_image(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -79,36 +125,148 @@ def run_masked_ksvd_image(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return hard_project(pred, img, mask)
 
 
-def save_results(size: int, u_bh: np.ndarray, u_ksvd: np.ndarray, u_crown: np.ndarray) -> None:
+def write_results_csv(rows: list[dict[str, object]]) -> None:
+    fieldnames = [
+        "size",
+        "method",
+        "K",
+        "sparsity",
+        "n_train",
+        "dict_iters",
+        "als_iters",
+        "crown_T",
+        "runtime_sec",
+        "full_psnr",
+        "full_ssim",
+        "full_mse",
+        "full_mae",
+        "hole_psnr",
+        "hole_mse",
+        "hole_mae",
+        "boundary_mae",
+        "observed_max_abs_err",
+    ]
+    with (OUTPUT_DIR / "results.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
+
+
+def write_summary(rows: list[dict[str, object]]) -> None:
+    summary = {
+        "parameters": {
+            "seed": SEED,
+            "K": K,
+            "sparsity": SPARSITY,
+            "dict_iters": DICT_ITERS,
+            "als_iters": ALS_ITERS,
+            "n_train": TRAIN_PATCHES,
+            "crown_T": 5,
+        },
+        "by_size": {},
+    }
+    for size in sorted({int(row["size"]) for row in rows}):
+        size_rows = [row for row in rows if int(row["size"]) == size]
+        by_method = {str(row["method"]): row for row in size_rows}
+        summary["by_size"][str(size)] = {
+            method: {
+                "hole_psnr": float(row["hole_psnr"]),
+                "full_psnr": float(row["full_psnr"]),
+                "full_ssim": float(row["full_ssim"]),
+                "runtime_sec": row.get("runtime_sec", ""),
+            }
+            for method, row in by_method.items()
+        }
+        if "crown" in by_method and "biharmonic" in by_method:
+            summary["by_size"][str(size)]["crown_minus_biharmonic_hole_psnr"] = (
+                float(by_method["crown"]["hole_psnr"])
+                - float(by_method["biharmonic"]["hole_psnr"])
+            )
+        if "masked_ksvd" in by_method and "biharmonic" in by_method:
+            summary["by_size"][str(size)]["masked_ksvd_minus_biharmonic_hole_psnr"] = (
+                float(by_method["masked_ksvd"]["hole_psnr"])
+                - float(by_method["biharmonic"]["hole_psnr"])
+            )
+    (OUTPUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+
+def save_results(
+    size: int,
+    clean: np.ndarray,
+    mask: np.ndarray,
+    observed: np.ndarray,
+    outputs: dict[str, np.ndarray],
+    runtimes: dict[str, float],
+) -> list[dict[str, object]]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    np.save(OUTPUT_DIR / f"biharmonic_{size}.npy", u_bh)
-    np.save(OUTPUT_DIR / f"masked_ksvd_{size}.npy", u_ksvd)
-    np.save(OUTPUT_DIR / f"crown_{size}.npy", u_crown)
+    np.save(OUTPUT_DIR / f"gt_{size}.npy", clean)
+    np.save(OUTPUT_DIR / f"input_{size}.npy", observed)
+    np.save(OUTPUT_DIR / f"mask_{size}.npy", mask)
+    for method, arr in outputs.items():
+        np.save(OUTPUT_DIR / f"{method}_{size}.npy", arr)
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    for ax, img, title in zip(
-        axes,
-        [u_bh, u_ksvd, u_crown],
-        ["Biharmonic", "Masked K-SVD", "CROWN"],
-    ):
+    rows = []
+    for method, pred in outputs.items():
+        row = {
+            "size": size,
+            "method": method,
+            "K": K,
+            "sparsity": SPARSITY,
+            "n_train": TRAIN_PATCHES,
+            "dict_iters": DICT_ITERS,
+            "als_iters": ALS_ITERS,
+            "crown_T": 5 if method == "crown" else "",
+            "runtime_sec": runtimes.get(method, ""),
+        }
+        row.update(compute_metrics(clean, pred, mask))
+        rows.append(row)
+
+    fig, axes = plt.subplots(1, 5, figsize=(18, 4))
+    panels = [
+        ("Input", observed),
+        (
+            f"Biharmonic\n{rows[0]['hole_psnr']:.2f} dB hole",
+            outputs["biharmonic"],
+        ),
+        (
+            f"Masked K-SVD\n{rows[1]['hole_psnr']:.2f} dB hole",
+            outputs["masked_ksvd"],
+        ),
+        (
+            f"CROWN\n{rows[2]['hole_psnr']:.2f} dB hole",
+            outputs["crown"],
+        ),
+        ("GT", clean),
+    ]
+    for ax, (title, img) in zip(axes, panels):
         ax.imshow(img, cmap="gray", vmin=0.0, vmax=1.0)
-        ax.set_title(f"{title} ({size}x{size})")
+        ax.contour(mask == 0, levels=[0.5], colors="tab:red", linewidths=0.5)
+        ax.set_title(f"{title}\n{size}x{size}" if title in {"Input", "GT"} else title)
         ax.axis("off")
     fig.tight_layout()
     fig.savefig(OUTPUT_DIR / f"comparison_{size}.png", dpi=160, bbox_inches="tight")
     plt.close(fig)
+    return rows
 
 
 def main() -> None:
+    all_rows = []
     for size in [256, 512]:
         img = sk_resize(brick_512, (size, size), anti_aliasing=True, preserve_range=False)
         mask = make_square_hole(size, hole_size=size // 4)
         y = img * mask
 
+        t0 = time.time()
         u_bh = biharmonic_init(y, mask)
-        u_ksvd = run_masked_ksvd_image(img, mask)
+        bh_time = time.time() - t0
 
+        t0 = time.time()
+        u_ksvd = run_masked_ksvd_image(img, mask)
+        ksvd_time = time.time() - t0
+
+        t0 = time.time()
         D, _ = train_dictionary(
             y,
             mask,
@@ -122,8 +280,28 @@ def main() -> None:
         )
         out = run_crown_inpaint(y, mask, D, T=5, sparsity=min(SPARSITY, K), verbose=False)
         u_crown = hard_project(out["u"], img, mask)
+        crown_time = time.time() - t0
 
-        save_results(size, u_bh, u_ksvd, u_crown)
+        rows = save_results(
+            size,
+            img,
+            mask,
+            y,
+            {
+                "biharmonic": u_bh,
+                "masked_ksvd": u_ksvd,
+                "crown": u_crown,
+            },
+            {
+                "biharmonic": bh_time,
+                "masked_ksvd": ksvd_time,
+                "crown": crown_time,
+            },
+        )
+        all_rows.extend(rows)
+
+    write_results_csv(all_rows)
+    write_summary(all_rows)
 
 
 if __name__ == "__main__":

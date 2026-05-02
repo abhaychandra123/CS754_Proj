@@ -1,0 +1,35 @@
+{
+  "parameters": {
+    "seed": 42,
+    "K": 256,
+    "sparsity": 8,
+    "dict_iters": 15,
+    "als_iters": 10,
+    "n_train": 3000,
+    "crown_T": 5
+  },
+  "by_size": {
+    "256": {
+      "biharmonic": {
+        "hole_psnr": 19.431442074192702,
+        "full_psnr": 31.47264190075195,
+        "full_ssim": 0.9624039375457413,
+        "runtime_sec": ""
+      },
+      "masked_ksvd": {
+        "hole_psnr": 8.189948726445607,
+        "full_psnr": 20.231148553004857,
+        "full_ssim": 0.9341561604105832,
+        "runtime_sec": ""
+      },
+      "crown": {
+        "hole_psnr": 16.159559501226944,
+        "full_psnr": 28.200759327786194,
+        "full_ssim": 0.9560294465653625,
+        "runtime_sec": ""
+      },
+      "crown_minus_biharmonic_hole_psnr": -3.271882572965758,
+      "masked_ksvd_minus_biharmonic_hole_psnr": -11.241493347747095
+    }
+  }
+}
